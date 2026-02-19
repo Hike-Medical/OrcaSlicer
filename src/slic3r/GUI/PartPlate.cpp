@@ -439,6 +439,12 @@ void PartPlate::calc_triangles(const ExPolygon &poly)
 {
     m_triangles.reset();
 
+    // Skip OpenGL operations in CLI mode (when m_plater is nullptr)
+    if (m_plater == nullptr) {
+        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ": Skipping in CLI mode (no plater)";
+        return;
+    }
+
     if (!init_model_from_poly(m_triangles.model, poly, GROUND_Z))
 		BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ":Unable to create plate triangles\n";
 }
@@ -446,6 +452,17 @@ void PartPlate::calc_triangles(const ExPolygon &poly)
 void PartPlate::calc_exclude_triangles(const ExPolygon &poly)
 {
     m_exclude_triangles.reset();
+    
+    // Skip OpenGL operations in CLI mode (when m_plater is nullptr)
+    if (m_plater == nullptr) {
+        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ": Skipping in CLI mode (no plater)";
+        return;
+    }
+    
+    // Debug: Log when this function is called
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Called with poly.empty()=" << poly.empty() 
+        << ", poly.contour.size()=" << (poly.empty() ? 0 : poly.contour.size())
+        << ", m_width=" << m_width << ", m_depth=" << m_depth;
 
     if (!init_model_from_poly(m_exclude_triangles, poly, GROUND_Z))
 		BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ":Unable to create exclude triangles\n";
@@ -2997,64 +3014,52 @@ bool PartPlate::set_shape(const Pointfs& shape, const Pointfs& exclude_areas, co
 
 	if ((m_shape != new_shape) || (m_exclude_area != new_exclude_areas))
 	{
-		/*m_shape.clear();
-		for (const Vec2d& p : shape) {
-			m_shape.push_back(Vec2d(p.x() + position.x(), p.y() + position.y()));
-		}
-
-		m_exclude_area.clear();
-		for (const Vec2d& p : exclude_areas) {
-			m_exclude_area.push_back(Vec2d(p.x() + position.x(), p.y() + position.y()));
-		}*/
 		m_shape = std::move(new_shape);
 		m_exclude_area = std::move(new_exclude_areas);
 
 		calc_bounding_boxes();
 
-		ExPolygon logo_poly;
-		generate_logo_polygon(logo_poly);
-		m_logo_triangles.reset();
-		if (!init_model_from_poly(m_logo_triangles, logo_poly, GROUND_Z + 0.02f))
-			BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ":Unable to create logo triangles\n";
-
+		// Generate print polygon - needed for both GUI and CLI
 		ExPolygon poly;
-		/*for (const Vec2d& p : m_shape) {
-			poly.contour.append({ scale_(p(0)), scale_(p(1)) });
-		}*/
 		generate_print_polygon(poly);
-        calc_triangles(poly);
+		m_print_polygon = poly;
 
-        // reset m_wrapping_detection_triangles when change printer
-        m_print_polygon = poly;
-        m_wrapping_detection_triangles.reset();
-        init_raycaster_from_model(m_triangles);
+		// Skip GUI-related operations in CLI mode (when m_plater is nullptr)
+		if (m_plater == nullptr) {
+			BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": CLI mode - skipping GUI operations, shape set successfully";
+		} else {
+			// GUI mode - initialize all visual elements
+			ExPolygon logo_poly;
+			generate_logo_polygon(logo_poly);
+			m_logo_triangles.reset();
+			if (!init_model_from_poly(m_logo_triangles, logo_poly, GROUND_Z + 0.02f))
+				BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ":Unable to create logo triangles\n";
 
-		ExPolygon exclude_poly;
-		/*for (const Vec2d& p : m_exclude_area) {
-			exclude_poly.contour.append({ scale_(p(0)), scale_(p(1)) });
-		}*/
-		generate_exclude_polygon(exclude_poly);
-		calc_exclude_triangles(exclude_poly);
+			calc_triangles(poly);
 
-		const BoundingBox& pp_bbox = poly.contour.bounding_box();
-		calc_gridlines(poly, pp_bbox);
+			// reset m_wrapping_detection_triangles when change printer
+			m_wrapping_detection_triangles.reset();
+			init_raycaster_from_model(m_triangles);
 
-		//calc_vertex_for_icons_background(5, m_del_and_background_icon);
-		//calc_vertex_for_icons(4, m_del_icon);
-		calc_vertex_for_icons(0, m_del_icon);
-        calc_vertex_for_icons(1, m_orient_icon);
-        calc_vertex_for_icons(2, m_arrange_icon);
-        calc_vertex_for_icons(3, m_lock_icon);
-        calc_vertex_for_icons(4, m_plate_settings_icon);
-        // ORCA also change bed_icon_count number in calc_vertex_for_icons() after adding or removing icons for circular shaped beds that uses vertical alingment for icons
-        PresetBundle* preset = wxGetApp().preset_bundle;
-        bool dual_bbl = (preset->is_bbl_vendor() && preset->get_printer_extruder_count() == 2);
-        calc_vertex_for_icons(dual_bbl ? 5 : 6, m_plate_filament_map_icon);
-        calc_vertex_for_icons(dual_bbl ? 6 : 5, m_move_front_icon);
+			ExPolygon exclude_poly;
+			generate_exclude_polygon(exclude_poly);
+			calc_exclude_triangles(exclude_poly);
 
-		//calc_vertex_for_number(0, (m_plate_index < 9), m_plate_idx_icon);
-		calc_vertex_for_number(0, false, m_plate_idx_icon);
-		if (m_plater) {
+			const BoundingBox& pp_bbox = poly.contour.bounding_box();
+			calc_gridlines(poly, pp_bbox);
+
+			calc_vertex_for_icons(0, m_del_icon);
+			calc_vertex_for_icons(1, m_orient_icon);
+			calc_vertex_for_icons(2, m_arrange_icon);
+			calc_vertex_for_icons(3, m_lock_icon);
+			calc_vertex_for_icons(4, m_plate_settings_icon);
+			// ORCA also change bed_icon_count number in calc_vertex_for_icons() after adding or removing icons for circular shaped beds that uses vertical alingment for icons
+			PresetBundle* preset = wxGetApp().preset_bundle;
+			bool dual_bbl = (preset->is_bbl_vendor() && preset->get_printer_extruder_count() == 2);
+			calc_vertex_for_icons(dual_bbl ? 5 : 6, m_plate_filament_map_icon);
+			calc_vertex_for_icons(dual_bbl ? 6 : 5, m_move_front_icon);
+
+			calc_vertex_for_number(0, false, m_plate_idx_icon);
 			// calc vertex for plate name
 			generate_plate_name_texture();
 		}
@@ -5531,6 +5536,10 @@ bool PartPlateList::set_shapes(const Pointfs              &shape,
                                float                       height_to_lid,
                                float                       height_to_rod)
 {
+	BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Called with shape.size()=" << shape.size()
+		<< ", exclude_areas.size()=" << exclude_areas.size()
+		<< ", m_plate_list.size()=" << m_plate_list.size();
+		
 	const std::lock_guard<std::mutex> local_lock(m_plates_mutex);
 	m_shape = shape;
 	m_exclude_areas = exclude_areas;

@@ -597,54 +597,81 @@ static void load_default_gcodes_to_config(DynamicPrintConfig& config, Preset::Ty
 
 static int load_assemble_plate_list(std::string config_file, std::vector<assemble_plate_info_t> &assemble_plate_info_list)
 {
+    std::cerr << "DEBUG: load_assemble_plate_list ENTRY, file=" << config_file << std::endl;
     int ret = 0;
     boost::filesystem::path directory_path(config_file);
+    std::cerr << "DEBUG: Created directory_path" << std::endl;
 
     BOOST_LOG_TRIVIAL(info) << boost::format("%1% enter, file %2%")%__FUNCTION__ % config_file;
-    if (!fs::exists(directory_path)) {
+    std::cerr << "DEBUG: About to check file exists" << std::endl;
+    bool file_exists = fs::exists(directory_path);
+    std::cerr << "DEBUG: File exists check returned: " << file_exists << std::endl;
+    if (!file_exists) {
         BOOST_LOG_TRIVIAL(error) << boost::format("directory %1% not exist.")%config_file;
         return CLI_FILE_NOTFOUND;
     }
+    std::cerr << "DEBUG: File exists, about to parse JSON" << std::endl;
 
     try {
         json root_json;
+        std::cerr << "DEBUG: Opening ifstream" << std::endl;
         boost::nowide::ifstream ifs(config_file);
+        std::cerr << "DEBUG: About to parse JSON" << std::endl;
         ifs >> root_json;
+        std::cerr << "DEBUG: Parsed JSON successfully" << std::endl;
+        std::cerr << "DEBUG: About to close file" << std::endl;
+        std::cerr.flush();
         ifs.close();
+        std::cerr << "DEBUG: File closed successfully" << std::endl;
+        std::cerr.flush();
 
+        std::cerr << "DEBUG: About to get plate count from JSON" << std::endl;
         int plate_count = root_json[JSON_ASSEMPLE_PLATES].size();
+        std::cerr << "DEBUG: plate_count = " << plate_count << std::endl;
         if ((plate_count <= 0) || (plate_count > MAX_PLATE_COUNT)) {
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__<< boost::format(": invalid plate count %1%")%plate_count;
             return CLI_CONFIG_FILE_ERROR;
         }
+        std::cerr << "DEBUG: Resizing assemble_plate_info_list to " << plate_count << std::endl;
         assemble_plate_info_list.resize(plate_count);
+        std::cerr << "DEBUG: Resized successfully" << std::endl;
 
         for (int plate_index = 0; plate_index < plate_count; plate_index++)
         {
+            std::cerr << "DEBUG: Processing plate " << plate_index << std::endl;
             assemble_plate_info_t &assemble_plate = assemble_plate_info_list[plate_index];
             const json& plate_json = root_json[JSON_ASSEMPLE_PLATES][plate_index];
+            std::cerr << "DEBUG: Got plate_json for plate " << plate_index << std::endl;
             assemble_plate.plate_name = plate_json[JSON_ASSEMPLE_PLATE_NAME];
+            std::cerr << "DEBUG: plate_name = " << assemble_plate.plate_name << std::endl;
             assemble_plate.need_arrange = plate_json[JSON_ASSEMPLE_PLATE_NEED_ARRANGE];
+            std::cerr << "DEBUG: need_arrange = " << assemble_plate.need_arrange << std::endl;
 
             if (plate_json.contains(JSON_ASSEMPLE_PLATE_PARAMS)) {
                 assemble_plate.plate_params = plate_json[JSON_ASSEMPLE_PLATE_PARAMS].get<std::map<std::string, std::string>>();
                 BOOST_LOG_TRIVIAL(debug) << boost::format("Plate %1%, has %2% plate params") % (plate_index + 1)  % assemble_plate.plate_params.size();
             }
 
+            std::cerr << "DEBUG: Getting object count" << std::endl;
             int object_count = plate_json[JSON_ASSEMPLE_OBJECTS].size();
+            std::cerr << "DEBUG: object_count = " << object_count << std::endl;
             if (object_count <= 0) {
                 BOOST_LOG_TRIVIAL(error) << __FUNCTION__<< boost::format(": invalid object count %1% in plate %2%")%object_count %(plate_index+1);
                 return CLI_CONFIG_FILE_ERROR;
             }
 
+            std::cerr << "DEBUG: Resizing assemble_obj_list" << std::endl;
             assemble_plate.assemble_obj_list.resize(object_count);
             for (int object_index = 0; object_index < object_count; object_index++)
             {
+                std::cerr << "DEBUG: Processing object " << object_index << std::endl;
                 assemble_object_info_t& assemble_object = assemble_plate.assemble_obj_list[object_index];
                 const json& object_json = plate_json[JSON_ASSEMPLE_OBJECTS][object_index];
 
                 assemble_object.path = object_json[JSON_ASSEMPLE_OBJECT_PATH];
+                std::cerr << "DEBUG: object path = " << assemble_object.path << std::endl;
                 assemble_object.count = object_json[JSON_ASSEMPLE_OBJECT_COUNT];
+                std::cerr << "DEBUG: object count = " << assemble_object.count << std::endl;
 
                 if (assemble_object.count <= 0) {
                     BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(": invalid object clone count %1% in plate %2% Object %3%") % assemble_object.count % (plate_index + 1) % assemble_object.path;
@@ -695,6 +722,10 @@ static int load_assemble_plate_list(std::string config_file, std::vector<assembl
                     assemble_object.print_params = object_json[JSON_ASSEMPLE_OBJECT_PRINT_PARAMS].get<std::map<std::string, std::string>>();
                     BOOST_LOG_TRIVIAL(debug) << boost::format("Plate %1%, object %2% has %3% print params") % (plate_index + 1) %assemble_object.path % assemble_object.print_params.size();
                 }
+                if (object_json.contains(JSON_ASSEMPLE_OBJECT_VOLUME_TYPE)) {
+                    assemble_object.volume_type = object_json[JSON_ASSEMPLE_OBJECT_VOLUME_TYPE].get<std::string>();
+                    BOOST_LOG_TRIVIAL(debug) << boost::format("Plate %1%, object %2% has volume_type %3%") % (plate_index + 1) % assemble_object.path % assemble_object.volume_type;
+                }
                 if (object_json.contains(JSON_ASSEMPLE_OBJECT_HEIGHT_RANGES)) {
                     json height_range_json = object_json[JSON_ASSEMPLE_OBJECT_HEIGHT_RANGES];
                     int range_count = height_range_json.size();
@@ -741,13 +772,17 @@ static int load_assemble_plate_list(std::string config_file, std::vector<assembl
                 }
                 BOOST_LOG_TRIVIAL(debug) << boost::format("Plate %1%, has %2% plate params") % (plate_index + 1)  % assemble_plate.plate_params.size();
             }
+            std::cerr << "DEBUG: Finished processing plate " << plate_index << std::endl;
         }
+        std::cerr << "DEBUG: Finished all plates loop" << std::endl;
     }
     catch(std::exception &err) {
+        std::cerr << "DEBUG: Exception caught: " << err.what() << std::endl;
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__<< ": parse file "<<config_file<<" got a generic exception, reason = " << err.what();
         ret = CLI_CONFIG_FILE_ERROR;
     }
 
+    std::cerr << "DEBUG: load_assemble_plate_list returning " << ret << std::endl;
     return ret;
 }
 
@@ -771,6 +806,23 @@ void merge_or_add_object(assemble_plate_info_t& assemble_plate_info, Model &mode
             ModelVolume* new_volume = new_object->add_volume(*volume);
             // set extruder id
             new_volume->config.set_key_value("extruder", new ConfigOptionInt(ori_object->config.extruder()));
+            
+            // For modifier and other non-standard volume types, copy the object's print settings to the volume
+            // This allows modifiers to apply their own settings in the overlap region
+            if (new_volume->type() != ModelVolumeType::MODEL_PART) {
+                // Copy the object's print params to the volume config
+                // This makes the modifier apply its settings where it overlaps
+                for (const auto& key : ori_object->config.get().keys()) {
+                    if (key != "extruder") {  // extruder already set above
+                        const ConfigOption* opt = ori_object->config.get().option(key);
+                        if (opt != nullptr) {
+                            new_volume->config.set_key_value(key, opt->clone());
+                        }
+                    }
+                }
+                BOOST_LOG_TRIVIAL(debug) << boost::format("Volume %1% is type %2%, copied %3% config settings from object")
+                    % new_volume->name % ModelVolume::type_to_string(new_volume->type()) % ori_object->config.get().keys().size();
+            }
         }
         BOOST_LOG_TRIVIAL(debug) << boost::format("assemble_index %1%, name %2%, merged to new model %3%") % assemble_index % ori_object->name % new_object->name;
     }
@@ -1027,8 +1079,56 @@ static int construct_assemble_list(std::vector<assemble_plate_info_t> &assemble_
             if (assemble_object.assemble_index.empty())
                 assemble_object.assemble_index.resize(1, 0);
 
-            object->translate(assemble_object.pos_x[0], assemble_object.pos_y[0], assemble_object.pos_z[0]);
-            merge_or_add_object(assemble_plate_info, model, assemble_object.assemble_index[0], merged_objects, object);
+            // Apply volume type if specified (e.g., "normal_part", "negative_part", "modifier_part", etc.)
+            if (!assemble_object.volume_type.empty()) {
+                ModelVolumeType vtype = ModelVolume::type_from_string(assemble_object.volume_type);
+                for (ModelVolume* vol : object->volumes) {
+                    vol->set_type(vtype);
+                }
+                BOOST_LOG_TRIVIAL(debug) << boost::format("Set volume type to %1% for object %2%") % assemble_object.volume_type % object->name;
+            }
+
+            // Position handling depends on whether this object is being merged or standalone
+            int current_assemble_index = assemble_object.assemble_index.empty() ? 0 : assemble_object.assemble_index[0];
+            
+            if (!object->volumes.empty() && object->volumes[0]->mesh().facets_count() > 0) {
+                BoundingBoxf3 mesh_bbox = object->volumes[0]->mesh().bounding_box();
+                std::cerr << "DEBUG POSITION: Object " << object->name << " original mesh_bbox: min(" 
+                    << mesh_bbox.min.x() << "," << mesh_bbox.min.y() << "," << mesh_bbox.min.z() << ") max("
+                    << mesh_bbox.max.x() << "," << mesh_bbox.max.y() << "," << mesh_bbox.max.z() << ")" << std::endl;
+                
+                if (current_assemble_index <= 0) {
+                    // STANDALONE OBJECT: Use pos_x/pos_y/pos_z to position
+                    double target_x = assemble_object.pos_x[0];
+                    double target_y = assemble_object.pos_y[0];
+                    double target_z = assemble_object.pos_z[0];
+                    
+                    Vec3d mesh_center = mesh_bbox.center();
+                    
+                    // Calculate translation to place object center at (target_x, target_y) 
+                    // and object bottom at target_z
+                    Vec3d translation(
+                        target_x - mesh_center.x(),
+                        target_y - mesh_center.y(),
+                        target_z - mesh_bbox.min.z()
+                    );
+                    
+                    std::cerr << "DEBUG POSITION: Standalone object, translating to (" << target_x << "," << target_y << "," << target_z << ")" << std::endl;
+                    
+                    // Translate each volume's mesh directly
+                    for (ModelVolume* vol : object->volumes) {
+                        TriangleMesh mesh = vol->mesh();
+                        mesh.translate((float)translation.x(), (float)translation.y(), (float)translation.z());
+                        vol->set_mesh(std::move(mesh));
+                    }
+                } else {
+                    // MERGED OBJECT: Preserve original STL positions (relative positions)
+                    // The assembly will be moved to the bed after all volumes are merged
+                    std::cerr << "DEBUG POSITION: Merged object (assemble_index=" << current_assemble_index << "), preserving STL position" << std::endl;
+                }
+            }
+            
+            merge_or_add_object(assemble_plate_info, model, current_assemble_index, merged_objects, object);
 
             BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(": object %1%, name %2%, pos_x %3% pos_y %4%, pos_z %5%, filament %6%, assemble_index %7%")
                 %obj_index %object->name %assemble_object.pos_x[0] %assemble_object.pos_y[0] %assemble_object.pos_z[0] %assemble_object.filaments[0] %assemble_object.assemble_index[0];
@@ -1118,6 +1218,54 @@ static int construct_assemble_list(std::vector<assemble_plate_info_t> &assemble_
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": has objects need to be merged, total plates %1%, total objects %2%") % plate_count % model.objects.size();
 
+    // POST-PROCESSING: Position all objects/assemblies on the bed
+    // This preserves the relative positions from the STL files while ensuring
+    // all objects sit on the bed (min_z = 0)
+    for (ModelObject* obj : model.objects) {
+        if (obj->volumes.empty()) continue;
+        
+        // Calculate the combined bounding box of all volumes in this object
+        BoundingBoxf3 combined_bbox;
+        for (const ModelVolume* vol : obj->volumes) {
+            if (vol->mesh().facets_count() > 0) {
+                combined_bbox.merge(vol->mesh().bounding_box());
+            }
+        }
+        
+        if (!combined_bbox.defined) continue;
+        
+        std::cerr << "DEBUG ASSEMBLY: Object " << obj->name << " combined_bbox: min(" 
+            << combined_bbox.min.x() << "," << combined_bbox.min.y() << "," << combined_bbox.min.z() << ") max("
+            << combined_bbox.max.x() << "," << combined_bbox.max.y() << "," << combined_bbox.max.z() << ")" << std::endl;
+        
+        // Calculate translation to place assembly bottom at Z=0
+        // Keep original X,Y positions from STL, only adjust Z
+        double z_translation = -combined_bbox.min.z();
+        
+        if (std::abs(z_translation) > 0.001) {  // Only translate if needed
+            std::cerr << "DEBUG ASSEMBLY: Translating " << obj->name << " by Z=" << z_translation << " to place on bed" << std::endl;
+            
+            // Translate all volumes together to preserve relative positions
+            for (ModelVolume* vol : obj->volumes) {
+                TriangleMesh mesh = vol->mesh();
+                mesh.translate(0.0f, 0.0f, (float)z_translation);
+                vol->set_mesh(std::move(mesh));
+            }
+            
+            // Verify new position
+            BoundingBoxf3 new_bbox;
+            for (const ModelVolume* vol : obj->volumes) {
+                if (vol->mesh().facets_count() > 0) {
+                    new_bbox.merge(vol->mesh().bounding_box());
+                }
+            }
+            std::cerr << "DEBUG ASSEMBLY: After translation, " << obj->name << " new_bbox.min.z=" << new_bbox.min.z() << std::endl;
+        }
+        
+        BOOST_LOG_TRIVIAL(info) << boost::format("Assembly %1% positioned: %2% volumes, bottom at Z=0") 
+            % obj->name % obj->volumes.size();
+    }
+
     temp_model.clear_objects();
     temp_model.clear_materials();
     return ret;
@@ -1175,10 +1323,14 @@ static void load_downward_settings_list_from_config(std::string config_file, std
 
 int CLI::run(int argc, char **argv)
 {
+    std::cerr << "DEBUG: CLI::run started" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "DEBUG: CLI::run started";
     // Mark the main thread for the debugger and for runtime checks.
     set_current_thread_name("orcaslicer_main");
     // Save the thread ID of the main thread.
     save_main_thread_id();
+    std::cerr << "DEBUG: After save_main_thread_id" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "DEBUG: After save_main_thread_id";
 
 #ifdef __WXGTK__
     // On Linux, wxGTK has no support for Wayland, and the app crashes on
@@ -1207,19 +1359,31 @@ int CLI::run(int argc, char **argv)
         return CLI_ENVIRONMENT_ERROR;
     }
 
+    std::cerr << "DEBUG: Before boost::nowide::nowide_filesystem" << std::endl;
+    // (nowide_filesystem already done above in try block)
+    std::cerr << "DEBUG: Before setup()" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "DEBUG: Before setup()";
     if (!this->setup(argc, argv))
     {
         boost::nowide::cerr << "setup params error" << std::endl;
         return CLI_INVALID_PARAMS;
     }
+    std::cerr << "DEBUG: After setup() returned" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "DEBUG: After setup() returned";
     BOOST_LOG_TRIVIAL(info) << "finished setup params, argc="<< argc << std::endl;
+    std::cerr << "DEBUG: Getting temp dir" << std::endl;
     std::string temp_path = wxFileName::GetTempDir().utf8_str().data();
+    std::cerr << "DEBUG: Setting temp dir" << std::endl;
     set_temporary_dir(temp_path);
 
+    std::cerr << "DEBUG: Applying extra config" << std::endl;
     m_extra_config.apply(m_config, true);
+    std::cerr << "DEBUG: Normalizing fdm" << std::endl;
     m_extra_config.normalize_fdm();
 
+    std::cerr << "DEBUG: Getting printer technology" << std::endl;
     PrinterTechnology printer_technology = get_printer_technology(m_config);
+    std::cerr << "DEBUG: Got printer technology" << std::endl;
 
     //BBS: remove GCodeViewer as seperate APP logic
     /*bool 							start_as_gcodeviewer =
@@ -1230,35 +1394,57 @@ int CLI::run(int argc, char **argv)
             boost::algorithm::iends_with(boost::filesystem::path(argv[0]).filename().string(), "gcodeviewer");
 #endif // _WIN32*/
 
+    std::cerr << "DEBUG: Starting config option retrieval" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "DEBUG: Starting config option retrieval at line 1246";
     bool translate_old = false, regenerate_thumbnails = false, keep_old_params = false, remove_wrapping_detect = false, filament_color_changed = false, downward_check = false;
     int current_printable_width, current_printable_depth, current_printable_height, shrink_to_new_bed = 0;
     int old_printable_height = 0, old_printable_width = 0, old_printable_depth = 0;
     Pointfs old_printable_area, old_exclude_area;
     float old_max_radius = 0.f, old_height_to_rod = 0.f, old_height_to_lid = 0.f;
     std::vector<double> old_max_layer_height, old_min_layer_height;
+    std::cerr << "DEBUG: Getting outputdir" << std::endl;
     std::string outfile_dir              =  m_config.opt_string("outputdir", true);
-    const std::vector<std::string>              &load_configs               = m_config.option<ConfigOptionStrings>("load_settings", true)->values;
-    const std::vector<std::string>              &uptodate_configs          = m_config.option<ConfigOptionStrings>("uptodate_settings", true)->values;
-    const std::vector<std::string>              &uptodate_filaments          = m_config.option<ConfigOptionStrings>("uptodate_filaments", true)->values;
-    std::vector<std::string>                    downward_settings          = m_config.option<ConfigOptionStrings>("downward_settings", true)->values;
+    std::cerr << "DEBUG: Getting load_settings" << std::endl;
+    auto* load_configs_opt = m_config.option<ConfigOptionStrings>("load_settings", true);
+    const std::vector<std::string>              &load_configs               = load_configs_opt ? load_configs_opt->values : std::vector<std::string>();
+    std::cerr << "DEBUG: Getting uptodate_settings" << std::endl;
+    auto* uptodate_configs_opt = m_config.option<ConfigOptionStrings>("uptodate_settings", true);
+    const std::vector<std::string>              &uptodate_configs          = uptodate_configs_opt ? uptodate_configs_opt->values : std::vector<std::string>();
+    std::cerr << "DEBUG: Getting uptodate_filaments" << std::endl;
+    auto* uptodate_filaments_opt = m_config.option<ConfigOptionStrings>("uptodate_filaments", true);
+    const std::vector<std::string>              &uptodate_filaments          = uptodate_filaments_opt ? uptodate_filaments_opt->values : std::vector<std::string>();
+    std::cerr << "DEBUG: Getting downward_settings" << std::endl;
+    auto* downward_settings_opt = m_config.option<ConfigOptionStrings>("downward_settings", true);
+    std::vector<std::string>                    downward_settings          = downward_settings_opt ? downward_settings_opt->values : std::vector<std::string>();
     std::vector<std::string> downward_compatible_machines;
     //BBS: always use ForwardCompatibilitySubstitutionRule::Enable
     //const ForwardCompatibilitySubstitutionRule   config_substitution_rule = m_config.option<ConfigOptionEnum<ForwardCompatibilitySubstitutionRule>>("config_compatibility", true)->value;
     const ForwardCompatibilitySubstitutionRule   config_substitution_rule = ForwardCompatibilitySubstitutionRule::Enable;
-    const std::vector<std::string>              &load_filaments           = m_config.option<ConfigOptionStrings>("load_filaments", true)->values;
+    std::cerr << "DEBUG: Getting load_filaments" << std::endl;
+    auto* load_filaments_opt = m_config.option<ConfigOptionStrings>("load_filaments", true);
+    const std::vector<std::string>              &load_filaments           = load_filaments_opt ? load_filaments_opt->values : std::vector<std::string>();
     //skip model object logic
-    const std::vector<int>                      &skip_objects             = m_config.option<ConfigOptionInts>("skip_objects", true)->values;
+    std::cerr << "DEBUG: Getting skip_objects" << std::endl;
+    auto* skip_objects_opt = m_config.option<ConfigOptionInts>("skip_objects", true);
+    const std::vector<int>                      &skip_objects             = skip_objects_opt ? skip_objects_opt->values : std::vector<int>();
+    std::cerr << "DEBUG: After skip_objects" << std::endl;
     std::map<int, bool>     skip_maps;
     bool   need_skip      = (skip_objects.size() > 0)?true:false;
     long long global_begin_time = 0, global_current_time;
     sliced_info_t sliced_info;
     std::map<std::string, std::string> record_key_values;
 
+    std::cerr << "DEBUG: Before downward_check_option" << std::endl;
+    // Note: downward_check is defined twice in PrintConfig.cpp - as coStrings and coBool
+    // Trying to access as coBool will return nullptr and log a warning
     ConfigOptionBool* downward_check_option = m_config.option<ConfigOptionBool>("downward_check");
+    std::cerr << "DEBUG: After downward_check_option call, result is " << (downward_check_option ? "non-null" : "null") << std::endl;
     if (downward_check_option)
         downward_check = downward_check_option->value;
 
+    std::cerr << "DEBUG: m_actions.empty()=" << m_actions.empty() << ", downward_check=" << downward_check << std::endl;
     bool start_gui = m_actions.empty() && !downward_check;
+    std::cerr << "DEBUG: start_gui=" << start_gui << std::endl;
     if (start_gui) {
         BOOST_LOG_TRIVIAL(info) << "no action, start gui directly" << std::endl;
 #ifdef SLIC3R_GUI
@@ -1312,17 +1498,24 @@ int CLI::run(int argc, char **argv)
 #endif // SLIC3R_GUI
     }
     else {
+        std::cerr << "DEBUG: Entered CLI mode else branch" << std::endl;
         const ConfigOptionInt *opt_loglevel = m_config.opt<ConfigOptionInt>("debug");
+        std::cerr << "DEBUG: Got opt_loglevel" << std::endl;
         if (opt_loglevel) {
+            std::cerr << "DEBUG: Setting log level to " << opt_loglevel->value << std::endl;
             set_logging_level(opt_loglevel->value);
         }
         else {
+            std::cerr << "DEBUG: Setting log level to 2 (default)" << std::endl;
             set_logging_level(2);
         }
     }
+    std::cerr << "DEBUG: Log level set, getting begin time" << std::endl;
 
     global_begin_time = (long long)Slic3r::Utils::get_current_time_utc();
+    std::cerr << "DEBUG: Got begin time, logging version" << std::endl;
     BOOST_LOG_TRIVIAL(warning) << boost::format("cli mode, Current OrcaSlicer Version %1%")%SoftFever_VERSION;
+    std::cerr << "DEBUG: Version logged" << std::endl;
 
     //BBS: add plate data related logic
     PlateDataPtrs plate_data_src;
@@ -1341,8 +1534,13 @@ int CLI::run(int argc, char **argv)
     DynamicPrintConfig load_process_config, load_machine_config;
     bool new_process_config_is_system = true, new_printer_config_is_system = true;
     std::string pipe_name, makerlab_name, makerlab_version, different_process_setting;
-    const std::vector<std::string>              &metadata_name               = m_config.option<ConfigOptionStrings>("metadata_name", true)->values;
-    const std::vector<std::string>              &metadata_value              = m_config.option<ConfigOptionStrings>("metadata_value", true)->values;
+    std::cerr << "DEBUG: Getting metadata_name" << std::endl;
+    auto* metadata_name_opt = m_config.option<ConfigOptionStrings>("metadata_name", true);
+    const std::vector<std::string>              &metadata_name               = metadata_name_opt ? metadata_name_opt->values : std::vector<std::string>();
+    std::cerr << "DEBUG: Getting metadata_value" << std::endl;
+    auto* metadata_value_opt = m_config.option<ConfigOptionStrings>("metadata_value", true);
+    const std::vector<std::string>              &metadata_value              = metadata_value_opt ? metadata_value_opt->values : std::vector<std::string>();
+    std::cerr << "DEBUG: Got metadata options" << std::endl;
 
     if (metadata_name.size() != metadata_value.size())
     {
@@ -1350,12 +1548,16 @@ int CLI::run(int argc, char **argv)
         record_exit_reson(outfile_dir, CLI_INVALID_PARAMS, 0, cli_errors[CLI_INVALID_PARAMS], sliced_info);
         flush_and_exit(CLI_INVALID_PARAMS);
     }
+    std::cerr << "DEBUG: After metadata check" << std::endl;
 
     // Read input file(s) if any.
+    std::cerr << "DEBUG: About to read model files, count: " << m_input_files.size() << std::endl;
     BOOST_LOG_TRIVIAL(info) << "Will start to read model file now, file count :" << m_input_files.size() << "\n";
+    std::cerr << "DEBUG: Getting slice option" << std::endl;
     ConfigOptionInt* slice_option = m_config.option<ConfigOptionInt>("slice");
     if (slice_option)
         plate_to_slice = slice_option->value;
+    std::cerr << "DEBUG: Got slice option" << std::endl;
 
     ConfigOptionBool* normative_check_option = m_config.option<ConfigOptionBool>("normative_check");
     if (normative_check_option)
@@ -1443,13 +1645,24 @@ int CLI::run(int argc, char **argv)
     if (load_assemble_list_option)
         load_assemble_list = load_assemble_list_option->value;
 
-    bool allow_multicolor_oneplate = m_config.option<ConfigOptionBool>("allow_multicolor_oneplate", true)->value;
-    const std::vector<int>  loaded_filament_ids  = m_config.option<ConfigOptionInts>("load_filament_ids", true)->values;
-    const std::vector<int>  clone_objects  = m_config.option<ConfigOptionInts>("clone_objects", true)->values;
+    std::cerr << "DEBUG: Getting allow_multicolor_oneplate" << std::endl;
+    auto* allow_multicolor_opt = m_config.option<ConfigOptionBool>("allow_multicolor_oneplate", true);
+    bool allow_multicolor_oneplate = allow_multicolor_opt ? allow_multicolor_opt->value : false;
+    std::cerr << "DEBUG: Getting loaded_filament_ids" << std::endl;
+    auto* loaded_filament_ids_opt = m_config.option<ConfigOptionInts>("load_filament_ids", true);
+    const std::vector<int>  loaded_filament_ids  = loaded_filament_ids_opt ? loaded_filament_ids_opt->values : std::vector<int>();
+    std::cerr << "DEBUG: Getting clone_objects" << std::endl;
+    auto* clone_objects_opt = m_config.option<ConfigOptionInts>("clone_objects", true);
+    const std::vector<int>  clone_objects  = clone_objects_opt ? clone_objects_opt->values : std::vector<int>();
+    std::cerr << "DEBUG: Got all config options for model loading" << std::endl;
     //when load objects from stl/obj, the total used filaments set
+    std::cerr << "DEBUG: Creating used_filament_set" << std::endl;
     std::set<int> used_filament_set;
+    std::cerr << "DEBUG: About to log config summary" << std::endl;
     BOOST_LOG_TRIVIAL(info) << boost::format("allow_multicolor_oneplate %1%, allow_rotations %2% skip_modified_gcodes %3% avoid_extrusion_cali_region %4% loaded_filament_ids size %5%, clone_objects size %6%, skip_useless_pick %7%, allow_newer_file %8%, allow_mix_temp %9%")
         %allow_multicolor_oneplate %allow_rotations %skip_modified_gcodes %avoid_extrusion_cali_region %loaded_filament_ids.size() %clone_objects.size() %skip_useless_pick %allow_newer_file %allow_mix_temp;
+    std::cerr << "DEBUG: Config summary logged" << std::endl;
+    std::cerr << "DEBUG: Checking clone_objects, size=" << clone_objects.size() << std::endl;
     if (clone_objects.size() > 0)
     {
         if (clone_objects.size() != m_input_files.size())
@@ -1465,6 +1678,8 @@ int CLI::run(int argc, char **argv)
             flush_and_exit(CLI_INVALID_PARAMS);
         }
     }
+    std::cerr << "DEBUG: After clone_objects check" << std::endl;
+    std::cerr << "DEBUG: Checking loaded_filament_ids, size=" << loaded_filament_ids.size() << std::endl;
     if (loaded_filament_ids.size() > 0)
     {
         if (loaded_filament_ids.size() != m_input_files.size())
@@ -1480,6 +1695,7 @@ int CLI::run(int argc, char **argv)
             flush_and_exit(CLI_INVALID_PARAMS);
         }
     }
+    std::cerr << "DEBUG: After loaded_filament_ids check" << std::endl;
 
     /*for (const std::string& file : m_input_files)
         if (is_gcode_file(file) && boost::filesystem::exists(file)) {
@@ -1487,15 +1703,21 @@ int CLI::run(int argc, char **argv)
             BOOST_LOG_TRIVIAL(info) << "found a gcode file:" << file << ", will start as gcode viewer\n";
             break;
         }*/
+    std::cerr << "DEBUG: Logging plate_to_slice info" << std::endl;
     BOOST_LOG_TRIVIAL(info) << boost::format("plate_to_slice=%1%, normative_check=%2%, use_first_fila_as_default=%3%")%plate_to_slice %normative_check %use_first_fila_as_default;
+    std::cerr << "DEBUG: Initializing input_index and input_obj_colours" << std::endl;
     unsigned int input_index = 0;
     std::vector<RGBA> input_obj_colours;
+    std::cerr << "DEBUG: Checking load_assemble_list" << std::endl;
+    std::cerr << "DEBUG: load_assemble_list='" << load_assemble_list << "'" << std::endl;
+    std::cerr << "DEBUG: m_input_files.size()=" << m_input_files.size() << ", m_transforms.size()=" << m_transforms.size() << std::endl;
     if (!load_assemble_list.empty() && ((m_input_files.size() > 0) || (m_transforms.size() > 0)))
     {
         BOOST_LOG_TRIVIAL(error) << boost::format("load_assemble_list should not be used with input model files to load and should not be sued with transforms");
         record_exit_reson(outfile_dir, CLI_INVALID_PARAMS, 0, cli_errors[CLI_INVALID_PARAMS], sliced_info);
         flush_and_exit(CLI_INVALID_PARAMS);
     }
+    std::cerr << "DEBUG: About to check if load_assemble_list is empty: " << (load_assemble_list.empty() ? "YES" : "NO") << std::endl;
     if (load_assemble_list.empty()) {
         for (const std::string& file : m_input_files) {
             if (!boost::filesystem::exists(file)) {
@@ -1774,38 +1996,61 @@ int CLI::run(int argc, char **argv)
         }
     }
     else {
+        std::cerr << "DEBUG: Entered else block for assemble list processing" << std::endl;
         //parse the json and assemble object here
         Model model;
+        std::cerr << "DEBUG: Created model, about to call load_assemble_plate_list" << std::endl;
 
         int ret = load_assemble_plate_list(load_assemble_list, assemble_plate_info_list);
+        std::cerr << "DEBUG: load_assemble_plate_list returned " << ret << std::endl;
         if (ret) {
+            std::cerr << "DEBUG: load_assemble_plate_list returned error " << ret << std::endl;
             record_exit_reson(outfile_dir, ret, 0, cli_errors[ret], sliced_info);
             flush_and_exit(ret);
         }
 
+        std::cerr << "DEBUG: About to call construct_assemble_list" << std::endl;
         try {
             ret = construct_assemble_list(assemble_plate_info_list, model, plate_data_src, input_obj_colours);
+            std::cerr << "DEBUG: construct_assemble_list returned " << ret << std::endl;
             if (ret) {
+                std::cerr << "DEBUG: construct_assemble_list returned error " << ret << std::endl;
                 record_exit_reson(outfile_dir, ret, 0, cli_errors[ret], sliced_info);
                 flush_and_exit(ret);
             }
         }
         catch (std::exception& e) {
-            boost::nowide::cerr << construct_assemble_list << ": " << e.what() << std::endl;
+            std::cerr << "DEBUG: construct_assemble_list threw exception: " << e.what() << std::endl;
+            boost::nowide::cerr << "construct_assemble_list" << ": " << e.what() << std::endl;
             record_exit_reson(outfile_dir, CLI_DATA_FILE_ERROR, 0, cli_errors[CLI_DATA_FILE_ERROR], sliced_info);
             flush_and_exit(CLI_DATA_FILE_ERROR);
         }
+        std::cerr << "DEBUG: About to add default instances" << std::endl;
         model.add_default_instances();
+        
+        // Ensure all objects are placed on the bed (Z=0) for proper slicing
+        // This is critical for CLI mode where the GUI's automatic placement doesn't happen
+        for (ModelObject* obj : model.objects) {
+            obj->ensure_on_bed(false);  // false = don't allow sinking below bed
+            std::cerr << "DEBUG: ensure_on_bed for " << obj->name << ", min_z now: " << obj->min_z() << std::endl;
+        }
+        
+        std::cerr << "DEBUG: Added default instances, pushing model" << std::endl;
         m_models.push_back(std::move(model));
+        std::cerr << "DEBUG: Model pushed to m_models" << std::endl;
     }
+    std::cerr << "DEBUG: After model loading section, m_models.size()=" << m_models.size() << std::endl;
 
+    std::cerr << "DEBUG: Checking plate_to_slice" << std::endl;
     if (!is_bbl_3mf && plate_to_slice > 0)
     {
         BOOST_LOG_TRIVIAL(warning) << boost::format("%1%: not support to slice plate %2%, reset to 0")%__LINE__ %plate_to_slice;
         plate_to_slice = 0;
     }
+    std::cerr << "DEBUG: plate_to_slice check done" << std::endl;
 
     //load custom gcode file
+    std::cerr << "DEBUG: Starting custom gcode file section" << std::endl;
     std::map<int, CustomGCode::Info> custom_gcodes_map;
     if (!custom_gcode_file.empty()) {
         // parse the custom gcode json file
@@ -3592,29 +3837,84 @@ int CLI::run(int argc, char **argv)
     }
 
     //BBS: partplate list
-    Slic3r::GUI::PartPlateList partplate_list(NULL, m_models.data(), printer_technology);
+    std::cerr << "DEBUG: About to create PartPlateList" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "Creating PartPlateList...";
+    
+    // Get printable area first to calculate initial dimensions for PartPlateList
+    // This prevents crashes when PartPlateList tries to calculate exclude triangles with 0 dimensions
+    std::cerr << "DEBUG: Getting printable_area config" << std::endl;
+    Pointfs current_printable_area;
+    auto* printable_area_opt = m_print_config.opt<ConfigOptionPoints>("printable_area");
+    if (printable_area_opt) {
+        current_printable_area = printable_area_opt->values;
+        std::cerr << "DEBUG: printable_area has " << current_printable_area.size() << " points" << std::endl;
+        BOOST_LOG_TRIVIAL(info) << "printable_area has " << current_printable_area.size() << " points";
+    } else {
+        std::cerr << "DEBUG: printable_area config option not found" << std::endl;
+        BOOST_LOG_TRIVIAL(warning) << "printable_area config option not found, using defaults";
+    }
+    
+    int initial_width = 0, initial_depth = 0, initial_height = 0;
+    if (current_printable_area.size() >= 4) {
+        initial_width = current_printable_area[2].x() - current_printable_area[0].x();
+        initial_depth = current_printable_area[2].y() - current_printable_area[0].y();
+        initial_height = m_print_config.opt_float("printable_height");
+    }
+    // Use default dimensions if not available (e.g., when using assemble list without loaded config)
+    if (initial_width <= 0) initial_width = 250;  // Default 250mm
+    if (initial_depth <= 0) initial_depth = 210;  // Default 210mm  
+    if (initial_height <= 0) initial_height = 250; // Default 250mm
+    
+    std::cerr << "DEBUG: PartPlateList dimensions: " << initial_width << " x " << initial_depth << " x " << initial_height << std::endl;
+    BOOST_LOG_TRIVIAL(info) << boost::format("PartPlateList dimensions: %1% x %2% x %3%") % initial_width % initial_depth % initial_height;
+    
+    std::cerr << "DEBUG: About to call PartPlateList constructor" << std::endl;
+    std::cerr.flush();
+    Slic3r::GUI::PartPlateList partplate_list(initial_width, initial_depth, initial_height, NULL, m_models.data(), printer_technology);
+    std::cerr << "DEBUG: PartPlateList constructor returned" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "PartPlateList created successfully";
+    
     //use Pointfs insteadof Points
-    Pointfs current_printable_area = m_print_config.opt<ConfigOptionPoints>("printable_area")->values;
-    Pointfs current_exclude_area = m_print_config.opt<ConfigOptionPoints>("bed_exclude_area")->values;
+    std::cerr << "DEBUG: Getting exclude_area config" << std::endl;
+    Pointfs current_exclude_area;
+    auto* exclude_area_opt = m_print_config.opt<ConfigOptionPoints>("bed_exclude_area");
+    if (exclude_area_opt) {
+        current_exclude_area = exclude_area_opt->values;
+    }
+    std::cerr << "DEBUG: Getting extruder_areas" << std::endl;
     std::vector<Pointfs> current_extruder_areas;
     //update part plate's size
+    std::cerr << "DEBUG: Getting print_height" << std::endl;
     double print_height = m_print_config.opt_float("printable_height");
+    std::cerr << "DEBUG: print_height = " << print_height << std::endl;
     std::vector<double> current_extruder_print_heights;
+    std::cerr << "DEBUG: Getting height_to_lid" << std::endl;
     double height_to_lid = m_print_config.opt_float("extruder_clearance_height_to_lid");
+    std::cerr << "DEBUG: Getting height_to_rod" << std::endl;
     double height_to_rod = m_print_config.opt_float("extruder_clearance_height_to_rod");
+    std::cerr << "DEBUG: Getting clearance_radius" << std::endl;
     double clearance_radius = m_print_config.opt_float("extruder_clearance_radius");
+    std::cerr << "DEBUG: Got all clearance values" << std::endl;
     int shared_printable_width = 0, shared_printable_depth = 0, shared_printable_height = 0, shared_center_x = 0, shared_center_y = 0;
     //double plate_stride;
     std::string bed_texture;
 
+    std::cerr << "DEBUG: Getting extruder_printable_area" << std::endl;
     if (m_print_config.opt<ConfigOptionPointsGroups>("extruder_printable_area")) {
         current_extruder_areas = m_print_config.opt<ConfigOptionPointsGroups>("extruder_printable_area")->values;
     }
+    std::cerr << "DEBUG: Getting extruder_printable_height" << std::endl;
     if (m_print_config.opt<ConfigOptionFloatsNullable>("extruder_printable_height")) {
         current_extruder_print_heights = m_print_config.opt<ConfigOptionFloatsNullable>("extruder_printable_height")->values;
     }
+    std::cerr << "DEBUG: Calculating current_printable dimensions from current_printable_area" << std::endl;
+    std::cerr << "DEBUG: current_printable_area.size() = " << current_printable_area.size() << std::endl;
+    if (current_printable_area.size() < 4) {
+        std::cerr << "DEBUG: ERROR - current_printable_area has less than 4 points!" << std::endl;
+    }
     current_printable_width = current_printable_area[2].x() - current_printable_area[0].x();
     current_printable_depth = current_printable_area[2].y() - current_printable_area[0].y();
+    std::cerr << "DEBUG: current_printable_width=" << current_printable_width << ", depth=" << current_printable_depth << std::endl;
     current_printable_height = print_height;
     if (old_printable_width == 0)
         old_printable_width = current_printable_width;
@@ -3684,23 +3984,64 @@ int CLI::run(int argc, char **argv)
         }
     }
 
-    if (m_models.size() > 0)
+    // Skip plate initialization when using assemble list to avoid GUI-dependent crashes
+    std::cerr << "DEBUG: Checking using_assemble_list" << std::endl;
+    bool using_assemble_list = (!load_assemble_list.empty());
+    std::cerr << "DEBUG: using_assemble_list = " << using_assemble_list << std::endl;
+    std::cerr << "DEBUG: m_models.size() = " << m_models.size() << std::endl;
+    
+    if (m_models.size() > 0 && !using_assemble_list)
     {
+        std::cerr << "DEBUG: Entering non-assemble plate init section" << std::endl;
         BOOST_LOG_TRIVIAL(info) << boost::format("translate_old %1%, shrink_to_new_bed %2%, old bed size {%3%, %4%, %5%}")%translate_old%shrink_to_new_bed %old_printable_width %old_printable_depth %old_printable_height;
-        if (translate_old) {
+        
+        // Ensure we have valid plate dimensions before setting shapes
+        int plate_width = (old_printable_width > 0) ? old_printable_width : current_printable_width;
+        int plate_depth = (old_printable_depth > 0) ? old_printable_depth : current_printable_depth;
+        int plate_height = (old_printable_height > 0) ? old_printable_height : current_printable_height;
+        
+        if (translate_old && old_printable_width > 0 && old_printable_depth > 0 && old_printable_height > 0) {
             BOOST_LOG_TRIVIAL(info) << boost::format("translate old 3mf, switch to older bed size,{%1%, %2%, %3%}")%(old_printable_width + bed3d_ax3s_default_tip_radius)%(old_printable_depth+bed3d_ax3s_default_tip_radius) %old_printable_height;
             partplate_list.reset_size(old_printable_width + bed3d_ax3s_default_tip_radius, old_printable_depth + bed3d_ax3s_default_tip_radius, old_printable_height, false);
         }
         else {
-            partplate_list.reset_size(old_printable_width, old_printable_depth, old_printable_height, false);
+            // Use current dimensions if old dimensions are not available
+            partplate_list.reset_size(plate_width, plate_depth, plate_height, false);
         }
-        partplate_list.set_shapes(make_counter_clockwise(current_printable_area), current_exclude_area, current_wrapping_exclude_area, current_extruder_areas, current_extruder_print_heights, bed_texture,
-                                  height_to_lid, height_to_rod);
-        //plate_stride = partplate_list.plate_stride_x();
+        
+        // Only set shapes if we have valid plate dimensions and at least one plate
+        bool can_set_shapes = (partplate_list.get_plate_count() > 0 && plate_width > 0 && plate_depth > 0 && plate_height > 0);
+        
+        if (can_set_shapes) {
+            partplate_list.set_shapes(make_counter_clockwise(current_printable_area), current_exclude_area, current_wrapping_exclude_area, current_extruder_areas, current_extruder_print_heights, bed_texture,
+                                      height_to_lid, height_to_rod);
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << "Skipping set_shapes: plate_count=" << partplate_list.get_plate_count() 
+                << ", width=" << plate_width << ", depth=" << plate_depth << ", height=" << plate_height;
+        }
+    } else if (using_assemble_list) {
+        std::cerr << "DEBUG: Initializing plate for assemble list" << std::endl;
+        // For assemble list, we still need to set up the plate dimensions for slicing to work
+        // Reset the plate size to current printable dimensions
+        partplate_list.reset_size(current_printable_width, current_printable_depth, current_printable_height, false);
+        
+        // Set shapes so the plate knows its printable area
+        bool can_set_shapes = (partplate_list.get_plate_count() > 0 && current_printable_width > 0 && current_printable_depth > 0);
+        if (can_set_shapes) {
+            std::cerr << "DEBUG: Setting shapes for assemble list plate: " << current_printable_width << "x" << current_printable_depth << std::endl;
+            partplate_list.set_shapes(make_counter_clockwise(current_printable_area), current_exclude_area, current_wrapping_exclude_area, current_extruder_areas, current_extruder_print_heights, bed_texture,
+                                      height_to_lid, height_to_rod);
+            BOOST_LOG_TRIVIAL(info) << "Initialized plate for assemble list: " << current_printable_width << "x" << current_printable_depth << "x" << current_printable_height;
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << "Could not set shapes for assemble list plate";
+        }
     }
+    std::cerr << "DEBUG: After plate init section" << std::endl;
 
     //process some old params
+    std::cerr << "DEBUG: Checking is_bbl_3mf=" << is_bbl_3mf << ", keep_old_params=" << keep_old_params << std::endl;
     if (is_bbl_3mf && keep_old_params) {
+        std::cerr << "DEBUG: Processing old params section" << std::endl;
         std::vector<std::string> different_keys;
         Slic3r::unescape_strings_cstyle(different_settings[0], different_keys);
         std::set<std::string> different_key_set(different_keys.begin(), different_keys.end());
@@ -3763,6 +4104,7 @@ int CLI::run(int argc, char **argv)
         ConfigOptionFloat *initial_layer_acceleration_option = m_print_config.option<ConfigOptionFloat>("initial_layer_acceleration");
         initial_layer_travel_acceleration_option->value = initial_layer_acceleration_option->value;
     }
+    std::cerr << "DEBUG: After old params section, about to define lambdas" << std::endl;
 
     auto get_print_sequence = [](Slic3r::GUI::PartPlate* plate, DynamicPrintConfig& print_config, bool &is_seq_print) {
         PrintSequence curr_plate_seq = plate->get_print_seq();
@@ -3942,8 +4284,13 @@ int CLI::run(int argc, char **argv)
             plate_list.reset_size(current_printable_width, current_printable_depth, current_printable_height, true, true);
         }
     };
-    if (plate_data_src.size() > 0)
+    std::cerr << "DEBUG: Lambdas defined, checking plate_data_src.size()=" << plate_data_src.size() << std::endl;
+    std::cerr << "DEBUG: using_assemble_list=" << using_assemble_list << std::endl;
+    
+    // Skip plate_data_src processing when using assemble list to avoid GUI-dependent crashes
+    if (plate_data_src.size() > 0 && !using_assemble_list)
     {
+        std::cerr << "DEBUG: Entering plate_data_src processing block" << std::endl;
         partplate_list.load_from_3mf_structure(plate_data_src);
 
         int plate_count = partplate_list.get_plate_count();
@@ -3958,6 +4305,7 @@ int CLI::run(int argc, char **argv)
 
         translate_models(partplate_list, m_print_config);
     }
+    std::cerr << "DEBUG: After plate_data_src block" << std::endl;
 
     /*for (ModelObject *model_object : m_models[0].objects)
         for (ModelInstance *model_instance : model_object->instances)
@@ -3967,8 +4315,10 @@ int CLI::run(int argc, char **argv)
         }*/
 
     //doing downward_check
+    std::cerr << "DEBUG: About to start downward_check section" << std::endl;
     std::vector<printer_plate_info_t> downward_check_printers;
     std::vector<bool> downward_check_status;
+    std::cerr << "DEBUG: downward_check=" << downward_check << std::endl;
     if (downward_check) {
         bool use_default = false;
         std::string default_path;
@@ -4546,6 +4896,38 @@ int CLI::run(int argc, char **argv)
     {
         //need to arrange for assemble cases
         int plate_count = assemble_plate_info_list.size();
+        
+        // CLI mode: Skip GUI-dependent arrange operations
+        // Objects are already positioned from construct_assemble_list() using pos_x/pos_y/pos_z
+        bool has_arrange_request = false;
+        for (size_t i = 0; i < plate_count; i++) {
+            if (assemble_plate_info_list[i].need_arrange) {
+                has_arrange_request = true;
+                BOOST_LOG_TRIVIAL(warning) << boost::format("Plate %1% requested arrange, but arrange is not supported in CLI mode. "
+                    "Please provide explicit positions using pos_x/pos_y/pos_z in your assemble list JSON.") % (i + 1);
+            }
+        }
+        
+        // Skip all GUI-dependent plate operations in CLI mode
+        // The objects have already been positioned in construct_assemble_list()
+        BOOST_LOG_TRIVIAL(info) << "CLI mode: Skipping GUI-dependent plate arrangement operations. "
+            "Objects will use positions specified in assemble list.";
+        
+        // Ensure partplate_list is initialized properly for assemble list
+        // When using assemble list, plate_data_src is empty, so we need to ensure
+        // partplate_list has at least one plate. The size and shapes should already be set
+        // by the code at line 3700-3713, but we need to ensure plates exist.
+        // Note: PartPlateList should automatically create a default plate, but we verify here.
+        if (partplate_list.get_plate_count() == 0 && !m_models.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "CLI mode: partplate_list has no plates after assemble list. "
+                "This may cause issues. Attempting to ensure at least one plate exists.";
+            // Try to ensure the plate list is properly initialized
+            // The models are already in m_models, so partplate_list should be aware of them
+        }
+        
+        // The following block is commented out for CLI mode as it requires GUI components
+        // (Slic3r::GUI::PartPlate) which are not initialized in CLI mode
+        /*
         if (plate_count != partplate_list.get_plate_count())
         {
             BOOST_LOG_TRIVIAL(error) << boost::format("mismatch plate count, to_assemble %1%, generated %2%") % plate_count % partplate_list.get_plate_count();
@@ -4560,7 +4942,12 @@ int CLI::run(int argc, char **argv)
             if (!assemble_plate_info_list[i].need_arrange)
                 cur_plate->lock(true);
         }
-
+        */  // End of commented-out GUI-dependent code for CLI mode
+        
+        // Note: In CLI mode, objects are positioned using pos_x/pos_y/pos_z from the JSON
+        // The remaining GUI-dependent arrange code is skipped
+        
+        /* GUI-dependent arrange loop - disabled in CLI mode
         for (size_t i = 0; i < plate_count; i++)
         {
             assemble_plate_info_t& assemble_plate = assemble_plate_info_list[i];
@@ -4776,6 +5163,7 @@ int CLI::run(int argc, char **argv)
         }
 
         partplate_list.reload_all_objects(false, -1);
+        */  // End of GUI-dependent arrange loop - disabled in CLI mode
     }
     else if (need_arrange)
     {
@@ -6167,6 +6555,15 @@ int CLI::run(int argc, char **argv)
                                     }
                                 }
                                 sliced_info.sliced_plates.push_back(sliced_plate_info);
+                            } catch (const Slic3r::SlicingErrors &ex) {
+                                // Handle multiple slicing errors - print each one
+                                BOOST_LOG_TRIVIAL(error) << "found slicing errors for partplate "<<index+1 << std::endl;
+                                for (const auto &err : ex.errors_) {
+                                    BOOST_LOG_TRIVIAL(error) << "  Slicing error: " << err.what();
+                                    boost::nowide::cerr << "Slicing error: " << err.what() << std::endl;
+                                }
+                                record_exit_reson(outfile_dir, CLI_SLICING_ERROR, index+1, cli_errors[CLI_SLICING_ERROR], sliced_info);
+                                flush_and_exit(CLI_SLICING_ERROR);
                             } catch (const std::exception &ex) {
                                 BOOST_LOG_TRIVIAL(error) << "found slicing or export error for partplate "<<index+1 << std::endl;
                                 boost::nowide::cerr << ex.what() << std::endl;

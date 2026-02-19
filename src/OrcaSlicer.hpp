@@ -30,6 +30,7 @@ namespace IO {
 #define JSON_ASSEMPLE_OBJECT_POS_Z             "pos_z"
 #define JSON_ASSEMPLE_OBJECT_ASSEMBLE_INDEX    "assemble_index"
 #define JSON_ASSEMPLE_OBJECT_PRINT_PARAMS      "print_params"
+#define JSON_ASSEMPLE_OBJECT_VOLUME_TYPE       "volume_type"
 #define JSON_ASSEMPLE_ASSEMBLE_PARAMS         "assembled_params"
 
 
@@ -53,6 +54,7 @@ typedef struct _assembled_param_info {
 typedef struct _assemble_object_info {
     std::string         path;
     int                 count;
+    std::string         volume_type;  // "normal_part", "negative_part", "modifier_part", "support_enforcer", "support_blocker"
 
     std::vector<int>    filaments;
     std::vector<int>    assemble_index;
