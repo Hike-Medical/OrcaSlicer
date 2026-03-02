@@ -4045,6 +4045,58 @@ void PrintConfigDef::init_fff_params()
     def->mode     = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    // ZAA: Z Anti-Aliasing (non-planar contouring)
+    def = this->add("zaa_enabled", coBool);
+    def->label    = L("Z contouring enabled");
+    def->category = L("Quality");
+    def->tooltip  = L("Enable Z-layer contouring (aka Z-layer anti-aliasing). Dynamically varies Z height within each layer to reduce stair-stepping on top surfaces.");
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("zaa_min_z", coFloat);
+    def->label    = L("Z contouring minimum height");
+    def->category = L("Quality");
+    def->tooltip  = L("Minimum z layer height for contouring. Also controls slicing plane.");
+    def->sidetext = L("mm");
+    def->min      = 0;
+    def->max      = 100;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0.05));
+
+    def = this->add("zaa_minimize_perimeter_height", coFloat);
+    def->label    = L("Minimize wall height angle");
+    def->category = L("Quality");
+    def->tooltip  = L("Reduce top surface perimeter heights to match height of edge for perimeters less than this angle. Set 0 to disable.");
+    def->sidetext = u8"\u00B0";
+    def->min      = 0;
+    def->max      = 90;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(35));
+
+    def = this->add("zaa_dont_alternate_fill_direction", coBool);
+    def->label    = L("Don't alternate fill direction");
+    def->category = L("Quality");
+    def->tooltip  = L("When enabled, top surface infill direction is not alternated between layers. Useful for Z contouring.");
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("zaa_region_disable", coBool);
+    def->label    = L("Disable Z contouring for region");
+    def->category = L("Quality");
+    def->tooltip  = L("Disable Z contouring for this specific region.");
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def           = this->add("ironing_expansion", coFloat);
+    def->label    = L("Ironing expansion");
+    def->category = L("Quality");
+    def->tooltip  = L("Expand ironing area beyond the normal boundary. Useful with Z contouring.");
+    def->sidetext = L("mm");
+    def->min      = -100;
+    def->max      = 100;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0));
+
     def = this->add("layer_change_gcode", coString);
     def->label = L("Layer change G-code");
     def->tooltip = L("This G-code is inserted at every layer change after the Z lift.");

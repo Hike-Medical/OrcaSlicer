@@ -709,6 +709,33 @@ void PrintObject::ironing()
     }
 }
 
+void PrintObject::contour_z()
+{
+    if (this->set_started(posContouring)) {
+        if (!this->config().zaa_enabled) {
+            this->set_done(posContouring);
+            return;
+        }
+        BOOST_LOG_TRIVIAL(debug) << "Z-Contouring (ZAA) in parallel - start";
+        indexed_triangle_set mesh = this->model_object()->raw_indexed_triangle_set();
+        its_transform(mesh, this->trafo_centered(), true);
+        sla::IndexedMesh imesh(mesh);
+
+        tbb::parallel_for(
+            tbb::blocked_range<size_t>(0, m_layers.size()),
+            [this, &imesh](const tbb::blocked_range<size_t>& range) {
+                for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++ layer_idx) {
+                    m_print->throw_if_canceled();
+                    m_layers[layer_idx]->make_contour_z(imesh);
+                }
+            }
+        );
+        m_print->throw_if_canceled();
+        BOOST_LOG_TRIVIAL(debug) << "Z-Contouring (ZAA) in parallel - end";
+        this->set_done(posContouring);
+    }
+}
+
 // BBS
 void PrintObject::clear_overhangs_for_lift()
 {

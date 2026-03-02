@@ -241,6 +241,67 @@ std::ostream& operator<<(std::ostream &stm, const Vec2d &pointf)
     return stm << pointf(0) << "," << pointf(1);
 }
 
+Points to_points(const Points3 &points)
+{
+    Points result;
+    result.reserve(points.size());
+    for (const Point3 &pt : points)
+        result.emplace_back(pt.to_point());
+    return result;
+}
+
+void Point3::rotate(double angle, const Point3 &center)
+{
+    double cur_x = (double)this->x();
+    double cur_y = (double)this->y();
+    double s   = ::sin(angle);
+    double c   = ::cos(angle);
+    double dx  = cur_x - (double)center.x();
+    double dy  = cur_y - (double)center.y();
+    this->x() = (coord_t)round(center.x() + c * dx - s * dy);
+    this->y() = (coord_t)round(center.y() + s * dx + c * dy);
+}
+
+double Point3::ccw(const Point3 &p1, const Point3 &p2) const
+{
+    return cross2((p2 - p1).head<2>().cast<double>(), (*this - p1).head<2>().cast<double>());
+}
+
+double Point3::ccw(const Line3 &line) const
+{
+    return this->ccw(Point3(line.a), Point3(line.b));
+}
+
+double Point3::ccw_angle(const Point3 &p1, const Point3 &p2) const
+{
+    double a = atan2(p1.x() - (*this).x(), p1.y() - (*this).y())
+             - atan2(p2.x() - (*this).x(), p2.y() - (*this).y());
+    return a <= 0 ? a + 2*PI : a;
+}
+
+int Point3::nearest_point_index(const Points &points) const
+{
+    int idx = -1;
+    double distance = -1;
+    for (size_t i = 0; i < points.size(); ++i) {
+        double d = sqr<double>(this->x() - points[i].x()) + sqr<double>(this->y() - points[i].y());
+        if (distance == -1 || d < distance) {
+            idx = (int)i;
+            distance = d;
+            if (distance < EPSILON) break;
+        }
+    }
+    return idx;
+}
+
+bool Point3::nearest_point(const Points &points, Point3* point) const
+{
+    int idx = this->nearest_point_index(points);
+    if (idx == -1) return false;
+    *point = Point3(points.at(idx), 0);
+    return true;
+}
+
 namespace int128 {
 
 int orient(const Vec2crd &p1, const Vec2crd &p2, const Vec2crd &p3)

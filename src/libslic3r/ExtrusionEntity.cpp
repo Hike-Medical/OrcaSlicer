@@ -28,15 +28,26 @@ void ExtrusionPath::subtract_expolygons(const ExPolygons &collection, ExtrusionE
 void ExtrusionPath::clip_end(double distance)
 {
     this->polyline.clip_end(distance);
+    // ZAA: invalidate z_offsets since polyline points changed
+    if (this->z_contoured) {
+        this->z_offsets.clear();
+        this->z_contoured = false;
+    }
 }
 
 void ExtrusionPath::simplify(double tolerance)
 {
+    // ZAA: don't simplify contoured paths as it would lose Z offset data
+    if (this->z_contoured)
+        return;
     this->polyline.simplify(tolerance);
 }
 
 void ExtrusionPath::simplify_by_fitting_arc(double tolerance)
 {
+    // ZAA: don't simplify contoured paths as it would lose Z offset data
+    if (this->z_contoured)
+        return;
     this->polyline.simplify_by_fitting_arc(tolerance);
 }
 

@@ -6127,20 +6127,32 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         auto target_z = get_sloped_z(sloped->slope_begin.z_ratio);
         slope_need_z_travel = m_writer.will_move_z(target_z);
     }
+    // ZAA: check if this is a z-contoured path
+    bool zaa_contoured = path.z_contoured && !path.z_offsets.empty();
+    bool zaa_need_z_travel = false;
+    if (zaa_contoured) {
+        double zaa_first_z = m_nominal_z + path.z_offsets.front();
+        zaa_need_z_travel = m_writer.will_move_z(zaa_first_z);
+    }
     // Move to first point of extrusion path
     // path is 2D. But in slope lift case, lift z is done in travel_to function.
     // Add m_need_change_layer_lift_z when change_layer in case of no lift if m_last_pos is equal to path.first_point() by chance
-    if (!m_last_pos_defined || m_last_pos != path.first_point() || m_need_change_layer_lift_z || slope_need_z_travel) {
+    if (!m_last_pos_defined || m_last_pos != path.first_point() || m_need_change_layer_lift_z || slope_need_z_travel || zaa_need_z_travel) {
         const bool _last_pos_undefined = !m_last_pos_defined;
+        double travel_z = DBL_MAX;
+        if (sloped != nullptr)
+            travel_z = get_sloped_z(sloped->slope_begin.z_ratio);
+        else if (zaa_contoured)
+            travel_z = m_nominal_z + path.z_offsets.front();
         gcode += this->travel_to(
             path.first_point(),
             path.role(),
             "move to first " + description + " point",
-            sloped == nullptr ? DBL_MAX : get_sloped_z(sloped->slope_begin.z_ratio)
+            travel_z
         );
         m_need_change_layer_lift_z = false;
         // Orca: ensure Z matches planned layer height
-        if (_last_pos_undefined && !slope_need_z_travel) {
+        if (_last_pos_undefined && !slope_need_z_travel && !zaa_need_z_travel) {
             gcode += this->writer().travel_to_z(m_nominal_z, "ensure Z matches planned layer height", true);
         }
     }
@@ -6701,12 +6713,15 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             }
             // BBS: use G1 if not enable arc fitting or has no arc fitting result or in spiral_mode mode or we are doing sloped extrusion
             // Attention: G2 and G3 is not supported in spiral_mode mode
-            if (!m_config.enable_arc_fitting || path.polyline.fitting_result.empty() || m_config.spiral_mode || sloped != nullptr) {
+            // ZAA: also disable arc fitting for z_contoured paths
+            if (!m_config.enable_arc_fitting || path.polyline.fitting_result.empty() || m_config.spiral_mode || sloped != nullptr || zaa_contoured) {
                 double path_length = 0.;
                 double total_length = sloped == nullptr ? 0. : path.polyline.length() * SCALING_FACTOR;
+                size_t point_idx = 0;
                 for (const Line& line : path.polyline.lines()) {
                     std::string tempDescription = description;
                     const double line_length = line.length() * SCALING_FACTOR;
+                    ++point_idx; // point_idx now corresponds to line.b (destination point)
                     if (line_length < EPSILON)
                         continue;
                     path_length += line_length;
@@ -6719,7 +6734,25 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                             tempDescription += Slic3r::format(" | Old Flow Value: %0.5f Length: %0.5f",oldE, line_length);
                         }
                     }
-                    if (sloped == nullptr) {
+                    if (zaa_contoured && point_idx < path.z_offsets.size()) {
+                        // ZAA: Z-contoured extrusion with per-point Z offsets
+                        double z_offset_b = path.z_offsets[point_idx];
+                        double z_offset_a = path.z_offsets[point_idx - 1];
+                        double z_diff = z_offset_b - z_offset_a;
+                        // Adjust extrusion ratio based on Z change (more material when going down, less when going up)
+                        // For ironing, don't adjust extrusion ratio
+                        double extrusion_ratio = (path.role() != erIroning && path.height > 0)
+                            ? (path.height + z_diff) / path.height : 1.0;
+                        if (extrusion_ratio < 0.1) extrusion_ratio = 0.1;
+                        if (extrusion_ratio > 3.0) extrusion_ratio = 3.0;
+                        Vec2d dest2d = this->point_to_gcode(line.b);
+                        double z = m_nominal_z + z_offset_b;
+                        Vec3d dest3d(dest2d(0), dest2d(1), z);
+                        gcode += m_writer.extrude_to_xyz(
+                            dest3d,
+                            dE * extrusion_ratio,
+                            GCodeWriter::full_gcode_comment ? tempDescription : "", path.is_force_no_extrusion());
+                    } else if (sloped == nullptr) {
                         // Normal extrusion
                         gcode += m_writer.extrude_to_xy(
                             this->point_to_gcode(line.b),
@@ -6908,7 +6941,19 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     tempDescription += Slic3r::format(" | Old Flow Value: %0.5f Length: %0.5f",oldE, line_length);
                 }
             }
-            if (sloped == nullptr) {
+            if (zaa_contoured && i < path.z_offsets.size()) {
+                // ZAA: Z-contoured extrusion with per-point Z offsets (variable speed branch)
+                double z_offset_b = path.z_offsets[i];
+                double z_offset_a = (i > 0 && i - 1 < path.z_offsets.size()) ? path.z_offsets[i - 1] : z_offset_b;
+                double z_diff = z_offset_b - z_offset_a;
+                double extrusion_ratio = (path.role() != erIroning && path.height > 0)
+                    ? (path.height + z_diff) / path.height : 1.0;
+                if (extrusion_ratio < 0.1) extrusion_ratio = 0.1;
+                if (extrusion_ratio > 3.0) extrusion_ratio = 3.0;
+                double z = m_nominal_z + z_offset_b;
+                Vec3d dest3d(p(0), p(1), z);
+                gcode += m_writer.extrude_to_xyz(dest3d, dE * extrusion_ratio, GCodeWriter::full_gcode_comment ? tempDescription : "");
+            } else if (sloped == nullptr) {
                 // Normal extrusion
                 gcode += m_writer.extrude_to_xy(p, dE, GCodeWriter::full_gcode_comment ? tempDescription : "");
             } else {

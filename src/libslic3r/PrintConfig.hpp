@@ -1106,6 +1106,13 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloatsNullable, filament_ironing_spacing))
     ((ConfigOptionFloatsNullable, filament_ironing_inset))
     ((ConfigOptionFloatsNullable, filament_ironing_speed))
+    // ZAA: Z Anti-Aliasing (non-planar contouring)
+    ((ConfigOptionBool, zaa_enabled))
+    ((ConfigOptionFloat, zaa_min_z))
+    ((ConfigOptionFloat, zaa_minimize_perimeter_height))
+    ((ConfigOptionBool, zaa_dont_alternate_fill_direction))
+    ((ConfigOptionBool, zaa_region_disable))
+    ((ConfigOptionFloat, ironing_expansion))
     // Detect bridging perimeters
     ((ConfigOptionBool, detect_overhang_wall))
     ((ConfigOptionInt, wall_filament))

@@ -926,8 +926,11 @@ std::vector<SurfaceFill> group_fills(const Layer &layer, LockRegionParam &lock_p
                                                                    region_config.solid_infill_rotate_template.value);
                     params.fixed_angle = !region_config.solid_infill_rotate_template.value.empty();
                 }
+                // ZAA: disable fill direction alternation when zaa_dont_alternate_fill_direction is enabled
+                if (region_config.zaa_dont_alternate_fill_direction)
+                    params.fixed_angle = true;
                 params.bridge_angle = float(surface.bridge_angle);
-                
+
                 if (region_config.align_infill_direction_to_model) {
                     auto m = layer.object()->trafo().matrix();
                     params.angle += atan2((float) m(1, 0), (float) m(0, 0));
@@ -1566,6 +1569,9 @@ void Layer::make_ironing()
 					: config.ironing_speed);
                 ironing_params.angle        = (config.ironing_angle_fixed ? 0 : calculate_infill_rotation_angle(this->object(), this->id(), config.solid_infill_direction.value, config.solid_infill_rotate_template.value)) + config.ironing_angle * M_PI / 180.;
                 ironing_params.fixed_angle = config.ironing_angle_fixed || !config.solid_infill_rotate_template.value.empty();
+                // ZAA: disable fill direction alternation for ironing when zaa is active
+                if (config.zaa_dont_alternate_fill_direction)
+                    ironing_params.fixed_angle = true;
 				ironing_params.pattern      = config.ironing_pattern;
 				ironing_params.layerm 		= layerm;
 				by_extruder.emplace_back(ironing_params);
@@ -1656,6 +1662,12 @@ void Layer::make_ironing()
             // BBS: ironing inset
             double ironing_areas_offset = ironing_params.inset == 0 ? float(scale_(0.5 * nozzle_dmr)) : scale_(ironing_params.inset);
 			ironing_areas = intersection_ex(polys, offset(this->lslices, - ironing_areas_offset));
+			// ZAA: expand ironing areas if ironing_expansion is configured
+			{
+				const PrintRegionConfig &rc = ironing_params.layerm->region().config();
+				if (rc.ironing_expansion.value != 0)
+					ironing_areas = offset_ex(ironing_areas, scale_(rc.ironing_expansion.value));
+			}
 		}
 
         // Create the filler object.
