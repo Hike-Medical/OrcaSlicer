@@ -11,6 +11,7 @@
 #include "ExtrusionEntity.hpp"
 #include "ExtrusionEntityCollection.hpp"
 #include "Layer.hpp"
+#include "Print.hpp"
 #include "Point.hpp"
 #include "libslic3r.h"
 #include <cfloat>
@@ -60,11 +61,10 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
     for (Points::const_iterator it = points.begin(); it != points.end() - 1; ++it) {
         Vec2d p1d(unscale_(it->x()), unscale_(it->y()));
         Vec2d p2d(unscale_((it + 1)->x()), unscale_((it + 1)->y()));
-        Linef line(p1d, p2d);
+        Vec2d delta = p2d - p1d;
 
-        double length_mm = line.length();
+        double length_mm = delta.norm();
         int num_segments = int(std::ceil(length_mm / resolution_mm));
-        Vec2d delta = line.vector();
 
         for (int i = 0; i < num_segments + 1; i++) {
             Vec2d p = p1d + delta * i / num_segments;
