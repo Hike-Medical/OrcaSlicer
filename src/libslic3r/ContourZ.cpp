@@ -43,7 +43,7 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 
     Layer *layer = region->layer();
     coordf_t mesh_z = layer->print_z + mesh.ground_level();
-    coordf_t min_z = layer->object()->config().zaa_min_z;
+    coordf_t min_z = region->region().config().zaa_min_z;
 
     const Points &points = path.polyline.points;
     if (points.size() < 2)
