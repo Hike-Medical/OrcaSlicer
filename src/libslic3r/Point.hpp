@@ -261,9 +261,7 @@ inline bool operator<(const Point &l, const Point &r)
 class Point3 : public Vec3crd {
 public:
     Point3() : Vec3crd(0, 0, 0) {}
-    Point3(int32_t x, int32_t y, int32_t z = 0) : Vec3crd(coord_t(x), coord_t(y), coord_t(z)) {}
-    Point3(double x, double y, double z = 0.0) : Vec3crd(coord_t(lrint(x)), coord_t(lrint(y)), coord_t(lrint(z))) {}
-    Point3(const Point3 &rhs) { *this = rhs; }
+    Point3(coord_t x, coord_t y, coord_t z = 0) : Vec3crd(x, y, z) {}
     explicit Point3(const Point &rhs, coord_t z = 0) : Vec3crd(rhs.x(), rhs.y(), z) {}
     Point3(const Vec3crd &vec3crd) : Vec3crd(vec3crd) {}
 
@@ -281,7 +279,7 @@ public:
     Point3& operator+=(const Point3& rhs) { this->x() += rhs.x(); this->y() += rhs.y(); this->z() += rhs.z(); return *this; }
     Point3& operator-=(const Point3& rhs) { this->x() -= rhs.x(); this->y() -= rhs.y(); this->z() -= rhs.z(); return *this; }
     Point3& operator*=(const double &rhs) { this->x() = coord_t(this->x() * rhs); this->y() = coord_t(this->y() * rhs); this->z() = coord_t(this->z() * rhs); return *this; }
-    Point3 operator*(const double &rhs) { return Point3(this->x() * rhs, this->y() * rhs, this->z() * rhs); }
+    Point3 operator*(const double &rhs) { return Point3(coord_t(this->x() * rhs), coord_t(this->y() * rhs), coord_t(this->z() * rhs)); }
 
     void   rotate(double angle) { this->rotate(std::cos(angle), std::sin(angle)); }
     void   rotate(double cos_a, double sin_a) {
@@ -295,7 +293,7 @@ public:
     Point3 rotated(double angle) const { Point3 res(*this); res.rotate(angle); return res; }
     Point3 rotated(double cos_a, double sin_a) const { Point3 res(*this); res.rotate(cos_a, sin_a); return res; }
     Point3 rotated(double angle, const Point3 &center) const { Point3 res(*this); res.rotate(angle, center); return res; }
-    Point3 rotate_90_degree_ccw() const { return Point3(-this->y(), this->x(), this->z()); }
+    Point3 rotate_90_degree_ccw() const { return Point3(coord_t(-this->y()), coord_t(this->x()), coord_t(this->z())); }
 
     int    nearest_point_index(const Points &points) const;
     bool   nearest_point(const Points &points, Point3* point) const;
@@ -320,7 +318,7 @@ public:
 
 inline Point3 operator* (const Point3& l, const double& r)
 {
-    return { coord_t(l.x() * r), coord_t(l.y() * r), coord_t(l.z() * r) };
+    return Point3(coord_t(l.x() * r), coord_t(l.y() * r), coord_t(l.z() * r));
 }
 
 inline std::ostream &operator<<(std::ostream &os, const Point3 &pt)

@@ -236,7 +236,7 @@ class BoundingBox3  : public BoundingBox3Base<Vec3crd>
 public:
     BoundingBox3() : BoundingBox3Base<Vec3crd>() {}
     BoundingBox3(const Vec3crd &pmin, const Vec3crd &pmax) : BoundingBox3Base<Vec3crd>(pmin, pmax) {}
-    BoundingBox3(const Points3& points) : BoundingBox3Base<Vec3crd>(points) {}
+    BoundingBox3(const Points3& points) : BoundingBox3Base<Vec3crd>(points.begin(), points.end()) {}
 };
 
 class BoundingBoxf : public BoundingBoxBase<Vec2d> 
