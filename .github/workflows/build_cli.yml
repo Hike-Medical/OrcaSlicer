@@ -42,14 +42,17 @@ jobs:
       - name: Collect CLI binary
         run: |
           mkdir -p artifact
-          echo "=== Searching for orca-slicer binary ==="
-          find build/ -name "orca-slicer" -type f 2>/dev/null
-          BINARY=$(find build/ -name "orca-slicer" -type f | head -1)
+          # The real binary is in build/src/Release/ or under OrcaSlicer/bin/
+          echo "=== All orca-slicer files ==="
+          find build/ -name "orca-slicer" 2>/dev/null
+          # Find the ELF binary (not the shell wrapper)
+          BINARY=$(find build/ -name "orca-slicer" -type f -exec file {} \; | grep ELF | head -1 | cut -d: -f1)
           if [ -z "$BINARY" ]; then
-            echo "ERROR: orca-slicer binary not found!"
+            echo "ERROR: orca-slicer ELF binary not found!"
             find build/src/ -type f -executable 2>/dev/null | head -20
             exit 1
           fi
+          echo "Found binary: $BINARY ($(du -h "$BINARY" | cut -f1))"
           cp "$BINARY" artifact/
           ldd "$BINARY" | grep "=> /" | awk '{print $3}' | \
             xargs -I{} cp -n {} artifact/ 2>/dev/null || true
