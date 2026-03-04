@@ -712,10 +712,10 @@ void PrintObject::ironing()
 void PrintObject::contour_z()
 {
     if (this->set_started(posContouring)) {
-        // Check zaa_enabled from first region's config (it's a PrintRegionConfig param)
+        // Check zaa_enabled from any region's config (it's a PrintRegionConfig param)
         bool zaa_on = false;
-        for (const PrintRegion &region : this->print()->regions()) {
-            if (region.config().zaa_enabled) { zaa_on = true; break; }
+        for (size_t i = 0; i < this->num_printing_regions(); ++i) {
+            if (this->printing_region(i).config().zaa_enabled) { zaa_on = true; break; }
         }
         if (!zaa_on) {
             this->set_done(posContouring);
