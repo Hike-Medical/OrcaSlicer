@@ -681,8 +681,9 @@ namespace Slic3r
 
                     float tmp_cost = 0;
                     std::optional<unsigned int>prev = current_extruder_id;
+                    size_t fm_idx = std::min(idx, flush_matrix.size() - 1);
                     for (auto& f : sequence_in_group) {
-                        if (prev) { tmp_cost += flush_matrix[idx][*prev][f]; }
+                        if (prev) { tmp_cost += flush_matrix[fm_idx][*prev][f]; }
                         prev = f;
                     }
                     cost += tmp_cost;
@@ -712,7 +713,8 @@ namespace Slic3r
                     sequence = iter->second.second;
                 }
                 else {
-                    sequence = get_extruders_order(flush_matrix[idx], filament_used_in_group, filament_used_in_group_next_layer, current_extruder_id, use_forcast, &tmp_cost);
+                    size_t fm_idx2 = std::min(idx, flush_matrix.size() - 1);
+                    sequence = get_extruders_order(flush_matrix[fm_idx2], filament_used_in_group, filament_used_in_group_next_layer, current_extruder_id, use_forcast, &tmp_cost);
                     caches[hash_key] = { tmp_cost,sequence };
                 }
 

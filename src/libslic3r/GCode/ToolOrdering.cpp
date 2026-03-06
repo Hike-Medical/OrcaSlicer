@@ -148,9 +148,11 @@ static FilamentChangeStats calc_filament_change_info_by_toolorder(const PrintCon
     for (const auto& ls : layer_sequences) {
         for (const auto& item : ls) {
             int extruder_id = filament_map[item];
+            if (extruder_id < 0) extruder_id = 0;
             int last_filament = last_filament_per_extruder[extruder_id];
             if (last_filament != -1 && last_filament != item) {
-                int flush_volume = flush_matrix[extruder_id][last_filament][item];
+                size_t fm_id = std::min((size_t)extruder_id, flush_matrix.size() - 1);
+                int flush_volume = flush_matrix[fm_id][last_filament][item];
                 flush_volume_per_filament[item] += flush_volume;
                 total_filament_change_count += 1;
             }
@@ -932,13 +934,16 @@ void ToolOrdering::cal_most_used_extruder(const PrintConfig &config)
 {
     // record
     std::vector<int> extruder_count;
-    extruder_count.resize(config.nozzle_diameter.size(), 0);
+    size_t nozzle_count = config.nozzle_diameter.size();
+    extruder_count.resize(nozzle_count, 0);
     for (LayerTools &layer_tools : m_layer_tools) {
         std::vector<unsigned int> filaments = layer_tools.extruders;
         std::set<int> layer_extruder_count;
         //count once only
         for (unsigned int &filament : filaments) {
-            layer_extruder_count.insert(config.filament_map.values[filament] - 1);
+            int eid = (filament < config.filament_map.values.size()) ? config.filament_map.values[filament] - 1 : 0;
+            if (eid < 0 || eid >= (int)nozzle_count) eid = 0;
+            layer_extruder_count.insert(eid);
         }
 
         //record
@@ -984,8 +989,10 @@ bool ToolOrdering::cal_non_support_filaments(const PrintConfig &config,
     for (const LayerTools &layer_tool : m_layer_tools) {
         for (const unsigned int &filament : layer_tool.extruders) {
             //check first filament
-            if (!config.filament_map.values.empty() && initial_filaments[config.filament_map.values[filament] - 1] == -1) {
-                initial_filaments[config.filament_map.values[filament] - 1] = filament;
+            int fm_idx = (!config.filament_map.values.empty() && filament < config.filament_map.values.size()) ? config.filament_map.values[filament] - 1 : 0;
+            if (fm_idx < 0 || fm_idx >= (int)initial_filaments.size()) fm_idx = 0;
+            if (!config.filament_map.values.empty() && initial_filaments[fm_idx] == -1) {
+                initial_filaments[fm_idx] = filament;
                 find_first_filaments_count++;
             }
 
@@ -1001,8 +1008,10 @@ bool ToolOrdering::cal_non_support_filaments(const PrintConfig &config,
                 if (config.filament_map.values.empty())
                     return true;
 
-                if (initial_non_support_filaments[config.filament_map.values[filament] - 1] == -1) {
-                    initial_non_support_filaments[config.filament_map.values[filament] - 1] = filament;
+                int ns_idx = (filament < config.filament_map.values.size()) ? config.filament_map.values[filament] - 1 : 0;
+                if (ns_idx < 0 || ns_idx >= (int)initial_non_support_filaments.size()) ns_idx = 0;
+                if (initial_non_support_filaments[ns_idx] == -1) {
+                    initial_non_support_filaments[ns_idx] = filament;
                     find_count++;
                 }
 
@@ -1279,12 +1288,21 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
 
-        if (m_print->is_BBL_printer())
+        // Filament printability check only applies to multi-nozzle printers (e.g. X1E).
+        // Single-nozzle BBL printers (P1S) have only one nozzle — all filaments are printable.
+        if (m_print->is_BBL_printer() && nozzle_nums >= 2)
         check_filament_printable_after_group(used_filaments, filament_maps, print_config);
     }
     else {
         // we just need to change the map to 0 based
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) {return value - 1; });
+    }
+
+    // Clamp filament_maps to valid nozzle range [0, nozzle_nums-1].
+    // Prevents out-of-bounds on single-nozzle printers with multiple filaments.
+    for (auto& v : filament_maps) {
+        if (v < 0 || v >= (int)nozzle_nums)
+            v = 0;
     }
 
     std::vector<std::vector<unsigned int>>filament_sequences;

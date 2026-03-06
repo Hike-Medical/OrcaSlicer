@@ -2917,7 +2917,15 @@ void Print::apply_config_for_render(const DynamicConfig &config)
 
 std::vector<int> Print::get_filament_maps() const
 {
-    return m_config.filament_map.values;
+    auto maps = m_config.filament_map.values;
+    // Clamp to valid nozzle range (1-based) to prevent out-of-bounds
+    // access on single-nozzle printers with multiple filaments.
+    int nozzle_count = (int)m_config.nozzle_diameter.values.size();
+    for (auto& v : maps) {
+        if (v < 1 || v > nozzle_count)
+            v = 1;
+    }
+    return maps;
 }
 
 FilamentMapMode Print::get_filament_map_mode() const
