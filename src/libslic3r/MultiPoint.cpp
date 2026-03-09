@@ -245,7 +245,7 @@ std::vector<POINT> douglas_peucker_tmpl(const std::vector<POINT> &pts, double to
     return result_pts;
 }
 
-std::vector<Point> MultiPoint::_douglas_peucker(const std::vector<Point>& pts, const double tolerance)
+Points MultiPoint::_douglas_peucker(const Points &pts, const double tolerance)
 {
     return douglas_peucker_tmpl(pts, tolerance);
 }
@@ -529,7 +529,23 @@ void MultiPoint::symmetric_y(const coord_t &x_axis)
 
 Points3 MultiPoint3::_douglas_peucker(const Points3 &pts, const double tolerance)
 {
-    return douglas_peucker_tmpl(pts, tolerance);
+    // Douglas-Peucker in XY plane, preserving Z coordinates
+    Points pts2d;
+    pts2d.reserve(pts.size());
+    for (const Point3 &p : pts)
+        pts2d.push_back(p.to_point());
+    Points simplified = MultiPoint::_douglas_peucker(pts2d, tolerance);
+    // Rebuild Points3 by matching simplified points back to originals
+    Points3 result;
+    result.reserve(simplified.size());
+    size_t j = 0;
+    for (const Point &sp : simplified) {
+        while (j < pts.size() && pts[j].to_point() != sp)
+            ++j;
+        if (j < pts.size())
+            result.push_back(pts[j]);
+    }
+    return result;
 }
 
 void MultiPoint3::append(const Points &points) {
