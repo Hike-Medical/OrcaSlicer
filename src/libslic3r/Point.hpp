@@ -263,7 +263,7 @@ public:
 class Point3 : public Vec3crd {
 public:
     Point3() : Vec3crd(0, 0, 0) {}
-    Point3(int32_t x, int32_t y, int32_t z = 0) : Vec3crd(coord_t(x), coord_t(y), coord_t(z)) {}
+    Point3(coord_t x, coord_t y, coord_t z = 0) : Vec3crd(x, y, z) {}
     Point3(double x, double y, double z = 0.0) : Vec3crd(coord_t(std::round(x)), coord_t(std::round(y)), coord_t(std::round(z))) {}
     Point3(const Point3 &rhs) { *this = rhs; }
     explicit Point3(const Point &rhs, coord_t z) : Vec3crd(rhs.x(), rhs.y(), z) {}
@@ -284,7 +284,7 @@ public:
     Point3& operator+=(const Point3& rhs) { this->x() += rhs.x(); this->y() += rhs.y(); this->z() += rhs.z(); return *this; }
     Point3& operator-=(const Point3& rhs) { this->x() -= rhs.x(); this->y() -= rhs.y(); this->z() -= rhs.z(); return *this; }
 	Point3& operator*=(const double &rhs) { this->x() = coord_t(this->x() * rhs); this->y() = coord_t(this->y() * rhs); this->z() = coord_t(this->z() * rhs); return *this; }
-    Point3 operator*(const double &rhs) { return Point3(this->x() * rhs, this->y() * rhs, this->z() * rhs); }
+    Point3 operator*(const double &rhs) { return Point3(coord_t(this->x() * rhs), coord_t(this->y() * rhs), coord_t(this->z() * rhs)); }
     bool   both_comp(const Point3 &rhs, const std::string& op) {
         if (op == ">")
             return this->x() > rhs.x() && this->y() > rhs.y();
@@ -355,7 +355,7 @@ inline Point operator* (const Point& l, const double& r)
 
 inline Point3 operator* (const Point3& l, const double& r)
 {
-    return { coord_t(l.x() * r), coord_t(l.y() * r), coord_t(l.z() * r) };
+    return Point3(coord_t(l.x() * r), coord_t(l.y() * r), coord_t(l.z() * r));
 }
 
 inline std::ostream &operator<<(std::ostream &os, const Point &pt)
