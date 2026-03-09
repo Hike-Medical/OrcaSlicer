@@ -448,6 +448,7 @@ public:
         width.clear();
     }
 
+    void start_at_index(int index);
     ThickPolyline rebase_at(size_t idx);
     coordf_t get_width_at(size_t point_idx) const;
 
