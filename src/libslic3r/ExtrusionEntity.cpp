@@ -17,12 +17,12 @@ static const double slope_inner_outer_wall_gap = 0.4;
 
 void ExtrusionPath::intersect_expolygons(const ExPolygons &collection, ExtrusionEntityCollection* retval) const
 {
-    this->_inflate_collection(intersection_pl(Polylines{ polyline }, collection), retval);
+    this->_inflate_collection(intersection_pl(Polylines{ polyline.to_polyline() }, collection), retval);
 }
 
 void ExtrusionPath::subtract_expolygons(const ExPolygons &collection, ExtrusionEntityCollection* retval) const
 {
-    this->_inflate_collection(diff_pl(Polylines{ this->polyline }, collection), retval);
+    this->_inflate_collection(diff_pl(Polylines{ this->polyline.to_polyline() }, collection), retval);
 }
 
 void ExtrusionPath::clip_end(double distance)
@@ -32,11 +32,13 @@ void ExtrusionPath::clip_end(double distance)
 
 void ExtrusionPath::simplify(double tolerance)
 {
+    if (this->z_contoured) return;
     this->polyline.simplify(tolerance);
 }
 
 void ExtrusionPath::simplify_by_fitting_arc(double tolerance)
 {
+    if (this->z_contoured) return;
     this->polyline.simplify_by_fitting_arc(tolerance);
 }
 
@@ -53,7 +55,7 @@ void ExtrusionPath::_inflate_collection(const Polylines &polylines, ExtrusionEnt
 
 void ExtrusionPath::polygons_covered_by_width(Polygons &out, const float scaled_epsilon) const
 {
-    polygons_append(out, offset(this->polyline, float(scale_(this->width/2)) + scaled_epsilon));
+    polygons_append(out, offset(this->polyline.to_polyline(), float(scale_(this->width/2)) + scaled_epsilon));
 }
 
 void ExtrusionPath::polygons_covered_by_spacing(Polygons &out, const float scaled_epsilon) const
@@ -64,7 +66,7 @@ void ExtrusionPath::polygons_covered_by_spacing(Polygons &out, const float scale
     // SoftFever: TODO Mac trigger assersion errors
 //    assert(! bridge || this->width == this->height);
     auto flow = bridge ? Flow::bridging_flow(this->width, 0.f) : Flow(this->width, this->height, 0.f);
-    polygons_append(out, offset(this->polyline, 0.5f * float(flow.scaled_spacing()) + scaled_epsilon));
+    polygons_append(out, offset(this->polyline.to_polyline(), 0.5f * float(flow.scaled_spacing()) + scaled_epsilon));
 }
 
 void ExtrusionMultiPath::reverse()
@@ -116,9 +118,11 @@ Polyline ExtrusionMultiPath::as_polyline() const
         len -= paths.size() - 1;
         assert(len > 0);
         out.points.reserve(len);
-        out.points.push_back(paths.front().polyline.points.front());
-        for (size_t i_path = 0; i_path < paths.size(); ++ i_path)
-            out.points.insert(out.points.end(), paths[i_path].polyline.points.begin() + 1, paths[i_path].polyline.points.end());
+        out.points.push_back(paths.front().polyline.points.front().to_point());
+        for (size_t i_path = 0; i_path < paths.size(); ++ i_path) {
+            for (auto it = paths[i_path].polyline.points.begin() + 1; it != paths[i_path].polyline.points.end(); ++it)
+                out.points.push_back(it->to_point());
+        }
     }
     return out;
 }
@@ -149,7 +153,8 @@ Polygon ExtrusionLoop::polygon() const
     Polygon polygon;
     for (const ExtrusionPath &path : this->paths) {
         // for each polyline, append all points except the last one (because it coincides with the first one of the next polyline)
-        polygon.points.insert(polygon.points.end(), path.polyline.points.begin(), path.polyline.points.end()-1);
+        for (auto it = path.polyline.points.begin(); it != path.polyline.points.end() - 1; ++it)
+            polygon.points.push_back(it->to_point());
     }
     return polygon;
 }
@@ -168,7 +173,7 @@ bool ExtrusionLoop::split_at_vertex(const Point &point, const double scaled_epsi
         if (int idx = path->polyline.find_point(point, scaled_epsilon); idx != -1) {
             if (this->paths.size() == 1) {
                 // just change the order of points
-                Polyline p1, p2;
+                Polyline3 p1, p2;
                 path->polyline.split_at_index(idx, &p1, &p2);
                 if (p1.is_valid() && p2.is_valid()) {
                     p2.append(std::move(p1));
@@ -178,7 +183,7 @@ bool ExtrusionLoop::split_at_vertex(const Point &point, const double scaled_epsi
             } else {
                 // new paths list starts with the second half of current path
                 ExtrusionPaths new_paths;
-                Polyline p1, p2;
+                Polyline3 p1, p2;
                 path->polyline.split_at_index(idx, &p1, &p2);
                 new_paths.reserve(this->paths.size() + 1);
                 {
@@ -187,13 +192,13 @@ bool ExtrusionLoop::split_at_vertex(const Point &point, const double scaled_epsi
                     std::swap(p.polyline.fitting_result, p2.fitting_result);
                     if (p.polyline.is_valid()) new_paths.push_back(p);
                 }
-            
+
                 // then we add all paths until the end of current path list
                 new_paths.insert(new_paths.end(), path+1, this->paths.end());  // not including this path
-            
+
                 // then we add all paths since the beginning of current list up to the previous one
                 new_paths.insert(new_paths.end(), this->paths.begin(), path);  // not including this path
-            
+
                 // finally we add the first half of current path
                 {
                     ExtrusionPath p = *path;
@@ -249,19 +254,21 @@ void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang, const
 
     // Snap p to start or end of segment_idx if closer than scaled_epsilon.
     {
-        const Point *p1 = this->paths[path_idx].polyline.points.data() + segment_idx;
-        const Point *p2 = p1;
+        const Point3 *p1 = this->paths[path_idx].polyline.points.data() + segment_idx;
+        const Point3 *p2 = p1;
         ++p2;
-        double       d2_1 = (point - *p1).cast<double>().squaredNorm();
-        double       d2_2 = (point - *p2).cast<double>().squaredNorm();
+        Point pt1 = p1->to_point();
+        Point pt2 = p2->to_point();
+        double       d2_1 = (point - pt1).cast<double>().squaredNorm();
+        double       d2_2 = (point - pt2).cast<double>().squaredNorm();
         const double thr2 = scaled_epsilon * scaled_epsilon;
         if (d2_1 < d2_2) {
-            if (d2_1 < thr2) p = *p1;
+            if (d2_1 < thr2) p = pt1;
         } else {
-            if (d2_2 < thr2) p = *p2;
+            if (d2_2 < thr2) p = pt2;
         }
     }
-    
+
     // now split path_idx in two parts
     const ExtrusionPath &path = this->paths[path_idx];
     ExtrusionPath p1(path.role(), path.mm3_per_mm, path.width, path.height);
@@ -464,19 +471,19 @@ ExtrusionLoopSloped::ExtrusionLoopSloped(ExtrusionPaths&   original_paths,
         const double path_len = unscale_(path->length());
         if (path_len > remaining_length) {
             // Split current path into slope and non-slope part
-            Polyline slope_path;
-            Polyline flat_path;
+            Polyline3 slope_path;
+            Polyline3 flat_path;
             path->polyline.split_at_length(scale_(remaining_length), &slope_path, &flat_path);
 
-            add_slop(*path, slope_path, start_ratio, 1);
+            add_slop(*path, slope_path.to_polyline(), start_ratio, 1);
             start_ratio = 1;
 
-            paths.emplace_back(std::move(flat_path), *path);
+            paths.emplace_back(flat_path.to_polyline(), *path);
             remaining_length = 0;
         } else {
             remaining_length -= path_len;
             const double end_ratio = lerp(1.0, start_slope_ratio, remaining_length / slope_min_length);
-            add_slop(*path, path->polyline, start_ratio, end_ratio);
+            add_slop(*path, path->polyline.to_polyline(), start_ratio, end_ratio);
             start_ratio = end_ratio;
         }
     }
@@ -557,6 +564,25 @@ double ExtrusionLoopSloped::slope_path_length() {
         total_length += unscale_(start_ep.length());
     }
     return total_length;
+}
+
+void ExtrusionPath::collect_points(Points &dst) const
+{
+    dst.reserve(dst.size() + this->polyline.points.size());
+    for (const Point3 &p : this->polyline.points)
+        dst.push_back(p.to_point());
+}
+
+void ExtrusionMultiPath::collect_points(Points &dst) const
+{
+    for (const ExtrusionPath &path : this->paths)
+        path.collect_points(dst);
+}
+
+void ExtrusionLoop::collect_points(Points &dst) const
+{
+    for (const ExtrusionPath &path : this->paths)
+        path.collect_points(dst);
 }
 
 std::string ExtrusionEntity::role_to_string(ExtrusionRole role)

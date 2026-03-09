@@ -2159,6 +2159,15 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                     obj->set_done(posIroning);
             }
         }
+        for (PrintObject *obj : m_objects) {
+            if (need_slicing_objects.count(obj) != 0) {
+                obj->contour_z();
+            }
+            else {
+                if (obj->set_started(posContouring))
+                    obj->set_done(posContouring);
+            }
+        }
 
         tbb::parallel_for(tbb::blocked_range<int>(0, int(m_objects.size())),
             [this, need_slicing_objects](const tbb::blocked_range<int>& range) {
@@ -2198,6 +2207,8 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                     obj->set_done(posInfill);
                 if (obj->set_started(posIroning))
                     obj->set_done(posIroning);
+                if (obj->set_started(posContouring))
+                    obj->set_done(posContouring);
                 if (obj->set_started(posSupportMaterial))
                     obj->set_done(posSupportMaterial);
                 if (obj->set_started(posDetectOverhangsForLift))
@@ -2207,6 +2218,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 obj->make_perimeters();
                 obj->infill();
                 obj->ironing();
+                obj->contour_z();
                 obj->generate_support_material();
                 obj->detect_overhangs_for_lift();
                 obj->estimate_curled_extrusions();
@@ -2577,7 +2589,7 @@ void Print::_make_skirt()
                     flow.width(),
 				    (float)initial_layer_print_height  // this will be overridden at G-code export time
                 )));
-            eloop.paths.back().polyline = loop.split_at_first_point();
+            eloop.paths.back().polyline = Polyline3(loop.split_at_first_point());
             m_skirt.append(eloop);
             if (m_config.min_skirt_length.value > 0) {
                 // The skirt length is limited. Sum the total amount of filament length extruded, in mm.
@@ -2635,7 +2647,7 @@ void Print::_make_skirt()
                         flow.width(),
                         (float)initial_layer_print_height  // this will be overridden at G-code export time
                     )));
-                eloop.paths.back().polyline = loop.split_at_first_point();
+                eloop.paths.back().polyline = Polyline3(loop.split_at_first_point());
                 object->m_skirt.append(std::move(eloop));
                 if (m_config.min_skirt_length.value > 0) {
                     // The skirt length is limited. Sum the total amount of filament length extruded, in mm.
@@ -4856,7 +4868,7 @@ ExtrusionLayers FakeWipeTower::getTrueExtrusionLayersFromWipeTower() const
             ++pre;
         }
     }
-    Point trans = {scale_(pos.x()), scale_(pos.y())};
+    Point3 trans(scale_(pos.x()), scale_(pos.y()), 0);
     for (auto it = outer_wall.begin(); it != outer_wall.end(); ++it) {
         int            index = std::distance(outer_wall.begin(), it);
         ExtrusionLayer el;
@@ -4864,7 +4876,7 @@ ExtrusionLayers FakeWipeTower::getTrueExtrusionLayersFromWipeTower() const
         paths.reserve(it->second.size());
         for (auto &polyline : it->second) {
             ExtrusionPath path(ExtrusionRole::erWipeTower, 0.0, 0.0, layer_heights[index]);
-            path.polyline = polyline;
+            path.polyline = Polyline3(polyline);
             for (auto &p : path.polyline.points) p += trans;
             paths.push_back(path);
         }
