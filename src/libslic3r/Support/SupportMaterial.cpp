@@ -1192,7 +1192,7 @@ namespace SupportMaterialInternal {
                     }
                 } else if (ep.size() >= 2) {
                     // Offset the polyline.
-                    polygons_append(out, offset(ep.polyline, exp, SUPPORT_SURFACES_OFFSET_PARAMETERS));
+                    polygons_append(out, offset(ep.polyline.to_polyline(), exp, SUPPORT_SURFACES_OFFSET_PARAMETERS));
                 }
             }
     }

@@ -3766,7 +3766,7 @@ static void to_json(json& j, const Polyline& poly_line) {
 }
 
 static void to_json(json& j, const ExtrusionPath& extrusion_path) {
-    j[JSON_EXTRUSION_POLYLINE] = extrusion_path.polyline;
+    j[JSON_EXTRUSION_POLYLINE] = extrusion_path.polyline.to_polyline();
     j[JSON_EXTRUSION_MM3_PER_MM] = extrusion_path.mm3_per_mm;
     j[JSON_EXTRUSION_WIDTH] = extrusion_path.width;
     j[JSON_EXTRUSION_HEIGHT] = extrusion_path.height;
@@ -4042,7 +4042,7 @@ static void from_json(const json& j, Polyline& poly_line) {
 }
 
 static void from_json(const json& j, ExtrusionPath& extrusion_path) {
-    extrusion_path.polyline               =    j[JSON_EXTRUSION_POLYLINE];
+    { Polyline tmp = j[JSON_EXTRUSION_POLYLINE]; extrusion_path.polyline = Polyline3(tmp); }
     extrusion_path.mm3_per_mm             =    j[JSON_EXTRUSION_MM3_PER_MM];
     extrusion_path.width                  =    j[JSON_EXTRUSION_WIDTH];
     extrusion_path.height                 =    j[JSON_EXTRUSION_HEIGHT];
