@@ -730,9 +730,14 @@ void PrintObject::contour_z()
 
     model_object()->instances.front()->transform_mesh(&mesh, true);
 
+    // Shift mesh to match path coordinate system: paths are centered by m_center_offset
+    Vec3d center_shift(- unscale<double>(m_center_offset.x()), - unscale<double>(m_center_offset.y()), 0.0);
+    mesh.translate(center_shift.x(), center_shift.y(), center_shift.z());
+
     BoundingBoxf3 mbb = mesh.bounding_box();
     BOOST_LOG_TRIVIAL(warning) << "ZAA contour_z: mesh bb min=(" << mbb.min.x() << "," << mbb.min.y() << "," << mbb.min.z()
         << ") max=(" << mbb.max.x() << "," << mbb.max.y() << "," << mbb.max.z() << ")"
+        << " center_offset=(" << unscale<double>(m_center_offset.x()) << "," << unscale<double>(m_center_offset.y()) << ")"
         << " layers=" << m_layers.size();
 
     sla::IndexedMesh imesh(mesh);
