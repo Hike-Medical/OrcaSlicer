@@ -247,7 +247,50 @@ std::vector<POINT> douglas_peucker_tmpl(const std::vector<POINT> &pts, double to
 
 Points MultiPoint::_douglas_peucker(const Points &pts, const double tolerance)
 {
-    return douglas_peucker_tmpl(pts, tolerance);
+    Points result_pts;
+    double tolerance_sq = tolerance * tolerance;
+    if (! pts.empty()) {
+        const Point  *anchor      = &pts.front();
+        size_t        anchor_idx  = 0;
+        const Point  *floater     = &pts.back();
+        size_t        floater_idx = pts.size() - 1;
+        result_pts.reserve(pts.size());
+        result_pts.emplace_back(*anchor);
+        if (anchor_idx != floater_idx) {
+            assert(pts.size() > 1);
+            std::vector<size_t> dpStack;
+            dpStack.reserve(pts.size());
+            dpStack.emplace_back(floater_idx);
+            for (;;) {
+                double max_dist_sq  = 0.0;
+                size_t furthest_idx = anchor_idx;
+                for (size_t i = anchor_idx + 1; i < floater_idx; ++ i) {
+                    double dist_sq = Line::distance_to_squared(pts[i], *anchor, *floater);
+                    if (dist_sq > max_dist_sq) {
+                        max_dist_sq  = dist_sq;
+                        furthest_idx = i;
+                    }
+                }
+                if (max_dist_sq <= tolerance_sq) {
+                    result_pts.emplace_back(*floater);
+                    anchor_idx = floater_idx;
+                    anchor     = floater;
+                    assert(dpStack.back() == floater_idx);
+                    dpStack.pop_back();
+                    if (dpStack.empty())
+                        break;
+                    floater_idx = dpStack.back();
+                } else {
+                    floater_idx = furthest_idx;
+                    dpStack.emplace_back(floater_idx);
+                }
+                floater = &pts[floater_idx];
+            }
+        }
+        assert(result_pts.front() == pts.front());
+        assert(result_pts.back()  == pts.back());
+    }
+    return result_pts;
 }
 
 // Visivalingam simplification algorithm https://github.com/slic3r/Slic3r/pull/3825
