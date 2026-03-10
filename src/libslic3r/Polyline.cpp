@@ -783,8 +783,25 @@ void Polyline3::simplify(double tolerance) {
 }
 
 void Polyline3::simplify_by_fitting_arc(double tolerance) {
-    //BBS: do arc fit first, then use DP simplify to handle the straight part to reduce point.
-    ArcFitter::do_arc_fitting_and_simplify(this->points, this->fitting_result, tolerance);
+    // Arc fitting operates in 2D — convert, fit, then map back
+    Points pts2d;
+    pts2d.reserve(this->points.size());
+    for (const Point3 &p : this->points)
+        pts2d.push_back(p.to_point());
+    ArcFitter::do_arc_fitting_and_simplify(pts2d, this->fitting_result, tolerance);
+    // pts2d may have been simplified — rebuild Points3
+    if (pts2d.size() != this->points.size()) {
+        Points3 new_pts;
+        new_pts.reserve(pts2d.size());
+        size_t j = 0;
+        for (const Point &sp : pts2d) {
+            while (j < this->points.size() && this->points[j].to_point() != sp)
+                ++j;
+            if (j < this->points.size())
+                new_pts.push_back(this->points[j]);
+        }
+        this->points = std::move(new_pts);
+    }
 }
 
 void Polyline3::reverse() {
@@ -980,7 +997,7 @@ void Polyline3::split_at(Point &point, Polyline3* p1, Polyline3* p2) const {
     double min = (p - point).cast<double>().norm();
     Lines3 lines = this->lines();
     for (Lines3::const_iterator line = lines.begin(); line != lines.end(); ++line) {
-        Point p_tmp = point.projection_onto(line->to_line());
+        Point p_tmp = point.projection_onto(Line(Point(line->a.x(), line->a.y()), Point(line->b.x(), line->b.y())));
         if ((p_tmp - point).cast<double>().norm() < min) {
 	        p = p_tmp;
 	        min = (p - point).cast<double>().norm();
@@ -1023,11 +1040,11 @@ bool Polyline3::split_at_length(const double length, Polyline3 *p1, Polyline3 *p
         double acc_length = 0;
         Point  p          = this->first_point().to_point();
         for (const auto &l : this->lines()) {
-            p = l.b.to_point();
+            p = Point(l.b.x(), l.b.y());
 
             const double current_length = l.length();
             if (acc_length + current_length >= length) {
-                p = lerp(l.a.to_point(), l.b.to_point(), (length - acc_length) / current_length);
+                p = lerp(Point(l.a.x(), l.a.y()), Point(l.b.x(), l.b.y()), (length - acc_length) / current_length);
                 break;
             }
             acc_length += current_length;
