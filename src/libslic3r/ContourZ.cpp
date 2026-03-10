@@ -19,8 +19,12 @@
 #include <cmath>
 #include <initializer_list>
 #include <string>
+#include <atomic>
+#include <boost/log/trivial.hpp>
 
 namespace Slic3r {
+
+static std::atomic<int> s_zaa_debug_counter{0};
 
 static void contour_extrusion_entity(LayerRegion *region, const sla::IndexedMesh &mesh, ExtrusionEntity *extr);
 
@@ -49,6 +53,27 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 
 	const Points3 &points = path.polyline.points;
 	double resolution_mm = 0.1;
+
+	// Debug: log first few paths
+	int cnt = s_zaa_debug_counter.fetch_add(1);
+	if (cnt < 10) {
+		BOOST_LOG_TRIVIAL(warning) << "ZAA contour_extrusion_path: role=" << path.role()
+			<< " layer_z=" << layer->print_z
+			<< " mesh_z=" << mesh_z
+			<< " ground_level=" << mesh.ground_level()
+			<< " height=" << layer->height
+			<< " min_z_cfg=" << min_z
+			<< " points=" << points.size()
+			<< " width=" << path.width;
+		if (!points.empty()) {
+			Vec2d p0(unscale_(points.front().x()), unscale_(points.front().y()));
+			sla::IndexedMesh::hit_result h_up = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, 1.0});
+			sla::IndexedMesh::hit_result h_dn = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, -1.0});
+			BOOST_LOG_TRIVIAL(warning) << "ZAA raycast at (" << p0.x() << "," << p0.y() << "," << mesh_z
+				<< "): up=" << h_up.distance() << " down=" << h_dn.distance()
+				<< " is_inside=" << h_up.is_inside();
+		}
+	}
 
 	coordf_t height = layer->height;
 	double minimize_perimeter_height_angle = region->region().config().zaa_minimize_perimeter_height;
@@ -198,8 +223,16 @@ static void contour_extrusion_entity(LayerRegion *region, const sla::IndexedMesh
 	// Other types (ExtrusionPathSloped, ExtrusionLoopSloped) — skip silently
 }
 
+static std::atomic<int> s_zaa_collection_debug{0};
+
 static void handle_extrusion_collection(LayerRegion *region, const sla::IndexedMesh &mesh, ExtrusionEntityCollection &collection, std::initializer_list<ExtrusionRole> roles) {
+	int dbg = s_zaa_collection_debug.fetch_add(1);
 	for (ExtrusionEntity *extr : collection.entities) {
+		if (dbg < 5) {
+			BOOST_LOG_TRIVIAL(warning) << "ZAA handle_collection: entity role=" << extr->role()
+				<< " type=" << typeid(*extr).name()
+				<< " accepted=" << (contains(roles, extr->role()) ? "YES" : "NO");
+		}
 		if (!contains(roles, extr->role())) {
 			continue;
 		}
@@ -207,8 +240,22 @@ static void handle_extrusion_collection(LayerRegion *region, const sla::IndexedM
 	}
 }
 
+static std::atomic<int> s_zaa_layer_debug{0};
+
 void Layer::make_contour_z(const sla::IndexedMesh &mesh)
 {
+	int dbg = s_zaa_layer_debug.fetch_add(1);
+	if (dbg < 3) {
+		BOOST_LOG_TRIVIAL(warning) << "ZAA make_contour_z: layer print_z=" << this->print_z
+			<< " height=" << this->height
+			<< " regions=" << this->regions().size()
+			<< " ground_level=" << mesh.ground_level();
+		for (size_t i = 0; i < this->regions().size(); i++) {
+			LayerRegion *r = this->regions()[i];
+			BOOST_LOG_TRIVIAL(warning) << "ZAA   region[" << i << "]: fills=" << r->fills.entities.size()
+				<< " perimeters=" << r->perimeters.entities.size();
+		}
+	}
 	for (LayerRegion *region : this->regions()) {
 		handle_extrusion_collection(region, mesh, region->fills, {erTopSolidInfill, erIroning, erExternalPerimeter, erMixed});
 		handle_extrusion_collection(region, mesh, region->perimeters, {erExternalPerimeter, erMixed});

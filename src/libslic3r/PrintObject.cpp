@@ -729,7 +729,14 @@ void PrintObject::contour_z()
         throw Slic3r::RuntimeError("ContourZ: unexpected number of instances");
 
     model_object()->instances.front()->transform_mesh(&mesh, true);
+
+    BoundingBoxf3 mbb = mesh.bounding_box();
+    BOOST_LOG_TRIVIAL(warning) << "ZAA contour_z: mesh bb min=(" << mbb.min.x() << "," << mbb.min.y() << "," << mbb.min.z()
+        << ") max=(" << mbb.max.x() << "," << mbb.max.y() << "," << mbb.max.z() << ")"
+        << " layers=" << m_layers.size();
+
     sla::IndexedMesh imesh(mesh);
+    BOOST_LOG_TRIVIAL(warning) << "ZAA contour_z: ground_level=" << imesh.ground_level();
 
     std::mutex mtx;
     size_t completed = 0;
