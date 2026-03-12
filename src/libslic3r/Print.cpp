@@ -3104,7 +3104,9 @@ void Print::_make_wipe_tower()
     m_wipe_tower_data.clear();
 
     // BBS
-    const unsigned int number_of_extruders = (unsigned int)(m_config.filament_colour.values.size());
+    const unsigned int number_of_extruders = (unsigned int)std::max(
+        m_config.filament_colour.values.size(),
+        m_config.filament_diameter.values.size());
 
     const auto bUseWipeTower2 = is_BBL_printer() || is_QIDI_printer() ? false : true;
     // Let the ToolOrdering class know there will be initial priming extrusions at the start of the print.

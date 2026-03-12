@@ -1233,7 +1233,13 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     if (!print_config || m_layer_tools.empty())
         return;
 
-    const unsigned int number_of_extruders = (unsigned int)(print_config->filament_colour.values.size() + EPSILON);
+    // Use the larger of filament_colour and filament_diameter sizes as the
+    // actual filament count.  filament_colour may not be set in filament profiles
+    // (e.g. same physical material at different temperatures) and default to 1,
+    // while filament_diameter is always set per-filament.
+    const unsigned int number_of_extruders = (unsigned int)std::max(
+        print_config->filament_colour.values.size(),
+        print_config->filament_diameter.values.size());
 
     using FlushMatrix = std::vector<std::vector<float>>;
     size_t             nozzle_nums = print_config->nozzle_diameter.values.size();
