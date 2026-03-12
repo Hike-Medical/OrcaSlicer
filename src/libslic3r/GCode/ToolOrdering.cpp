@@ -1126,6 +1126,13 @@ std::vector<int> ToolOrdering::get_recommended_filament_maps(const std::vector<s
     int master_extruder_id = print_config.master_extruder_id.value -1; // switch to 0 based idx
     std::vector<int>ret(filament_nums, master_extruder_id);
     bool ignore_ext_filament = false; // TODO: read from config
+    // For single-nozzle SEMM (e.g. P1S with AMS): assign each filament to its own
+    // virtual slot so that T0/T1 commands are generated for AMS slot changes.
+    if (extruder_nums == 1 && filament_nums > 1 && print->is_BBL_printer()) {
+        for (int i = 0; i < filament_nums; i++)
+            ret[i] = i;
+        return ret;
+    }
     // if mutli_extruder, calc group,otherwise set to 0
     if (extruder_nums == 2 && print->is_BBL_printer()) {
         std::vector<std::string> extruder_ams_count_str = print_config.extruder_ams_count.values;
@@ -1279,7 +1286,9 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
 
-        if (m_print->is_BBL_printer())
+        // Skip nozzle printability check for SEMM printers (single nozzle with AMS,
+        // e.g. P1S): T-commands represent AMS slot changes, not physical nozzle changes.
+        if (m_print->is_BBL_printer() && print_config->nozzle_diameter.values.size() >= 2)
         check_filament_printable_after_group(used_filaments, filament_maps, print_config);
     }
     else {
