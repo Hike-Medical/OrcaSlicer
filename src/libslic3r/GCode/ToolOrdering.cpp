@@ -1134,11 +1134,11 @@ std::vector<int> ToolOrdering::get_recommended_filament_maps(const std::vector<s
     int master_extruder_id = print_config.master_extruder_id.value -1; // switch to 0 based idx
     std::vector<int>ret(filament_nums, master_extruder_id);
     bool ignore_ext_filament = false; // TODO: read from config
-    // For single-nozzle SEMM (e.g. P1S with AMS): assign each filament to its own
-    // virtual slot so that T0/T1 commands are generated for AMS slot changes.
+    // For single-nozzle SEMM (e.g. P1S with AMS): all filaments stay on
+    // extruder 0 (the single physical nozzle). Tool changes (M1020) are
+    // triggered by filament_id changes, not extruder_id changes.
+    // ret is already initialized to master_extruder_id (0) for all entries.
     if (extruder_nums == 1 && filament_nums > 1 && print->is_BBL_printer()) {
-        for (int i = 0; i < filament_nums; i++)
-            ret[i] = i;
         return ret;
     }
     // if mutli_extruder, calc group,otherwise set to 0
