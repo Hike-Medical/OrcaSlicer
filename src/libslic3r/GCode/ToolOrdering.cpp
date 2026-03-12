@@ -1087,7 +1087,15 @@ std::vector<int> ToolOrdering::get_recommended_filament_maps(const std::vector<s
         return std::vector<int>();
 
     const auto& print_config = print->config();
-    const unsigned int filament_nums = (unsigned int)(print_config.filament_colour.values.size() + EPSILON);
+    // Derive filament count from layer_filaments (actual used filament IDs) to
+    // handle cases where filament_colour is not set in the filament profile and
+    // therefore defaults to a single entry, causing SEMM T-slot assignment to fail.
+    unsigned int max_filament_id = 0;
+    for (const auto& lf : layer_filaments)
+        for (auto f : lf)
+            if (f + 1 > max_filament_id) max_filament_id = f + 1;
+    const unsigned int filament_nums = std::max(max_filament_id,
+        (unsigned int)(print_config.filament_colour.values.size() + EPSILON));
 
     // get flush matrix
     std::vector<FlushMatrix> nozzle_flush_mtx;
