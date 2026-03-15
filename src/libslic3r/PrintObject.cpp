@@ -729,6 +729,14 @@ void PrintObject::contour_z()
         throw Slic3r::RuntimeError("ContourZ: unexpected number of instances");
 
     model_object()->instances.front()->transform_mesh(&mesh, true);
+
+    // Align mesh with path coordinate system: paths are centered by m_center_offset
+    // (see PrintObject ctor: "Add the center offset, which will be subtracted from
+    // the mesh when slicing"), so we must apply the same shift to the ray-cast mesh.
+    Vec3d center_shift(- unscale<double>(m_center_offset.x()),
+                       - unscale<double>(m_center_offset.y()), 0.0);
+    mesh.translate(center_shift.x(), center_shift.y(), center_shift.z());
+
     sla::IndexedMesh imesh(mesh);
 
     std::mutex mtx;
