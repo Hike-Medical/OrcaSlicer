@@ -739,33 +739,36 @@ void PrintObject::contour_z()
 
     sla::IndexedMesh imesh(mesh);
 
-    // Debug: log mesh and path alignment info
+    // Debug: write alignment info to a file so we can inspect it
     {
         BoundingBoxf3 mbb = mesh.bounding_box();
-        BOOST_LOG_TRIVIAL(warning) << "ZAA contour_z: mesh bb min=(" << mbb.min.x() << "," << mbb.min.y() << "," << mbb.min.z()
-            << ") max=(" << mbb.max.x() << "," << mbb.max.y() << "," << mbb.max.z() << ")"
-            << " center_offset=(" << unscale<double>(m_center_offset.x()) << "," << unscale<double>(m_center_offset.y()) << ")"
-            << " center_shift=(" << center_shift.x() << "," << center_shift.y() << ")"
-            << " ground_level=" << imesh.ground_level()
-            << " layers=" << m_layers.size();
-        // Log first point of first perimeter on layer 2
-        if (m_layers.size() > 2) {
-            Layer *l2 = m_layers[2];
-            for (LayerRegion *r : l2->regions()) {
-                for (ExtrusionEntity *e : r->perimeters.entities) {
-                    ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
-                    if (loop && !loop->paths.empty()) {
-                        auto &pts = loop->paths.front().polyline.points;
-                        if (!pts.empty()) {
-                            BOOST_LOG_TRIVIAL(warning) << "ZAA layer2 first_perim_point=("
-                                << unscale_(pts.front().x()) << "," << unscale_(pts.front().y()) << ")"
-                                << " print_z=" << l2->print_z;
-                            goto done_debug;
+        FILE *f = fopen("/tmp/zaa_debug.txt", "w");
+        if (f) {
+            fprintf(f, "mesh_bb_min=%.4f,%.4f,%.4f\n", mbb.min.x(), mbb.min.y(), mbb.min.z());
+            fprintf(f, "mesh_bb_max=%.4f,%.4f,%.4f\n", mbb.max.x(), mbb.max.y(), mbb.max.z());
+            fprintf(f, "center_offset=%.4f,%.4f\n", unscale<double>(m_center_offset.x()), unscale<double>(m_center_offset.y()));
+            fprintf(f, "center_shift=%.4f,%.4f\n", center_shift.x(), center_shift.y());
+            fprintf(f, "ground_level=%.4f\n", imesh.ground_level());
+            fprintf(f, "layers=%zu\n", m_layers.size());
+            if (m_layers.size() > 2) {
+                Layer *l2 = m_layers[2];
+                fprintf(f, "layer2_print_z=%.4f\n", l2->print_z);
+                for (LayerRegion *r : l2->regions()) {
+                    for (ExtrusionEntity *e : r->perimeters.entities) {
+                        ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
+                        if (loop && !loop->paths.empty()) {
+                            auto &pts = loop->paths.front().polyline.points;
+                            if (!pts.empty()) {
+                                fprintf(f, "layer2_first_perim=%.4f,%.4f\n",
+                                    unscale_(pts.front().x()), unscale_(pts.front().y()));
+                                goto done_debug;
+                            }
                         }
                     }
                 }
+                done_debug:;
             }
-            done_debug:;
+            fclose(f);
         }
     }
 
