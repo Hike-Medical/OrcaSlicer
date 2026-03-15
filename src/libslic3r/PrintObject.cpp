@@ -739,6 +739,36 @@ void PrintObject::contour_z()
 
     sla::IndexedMesh imesh(mesh);
 
+    // Debug: log mesh and path alignment info
+    {
+        BoundingBoxf3 mbb = mesh.bounding_box();
+        BOOST_LOG_TRIVIAL(warning) << "ZAA contour_z: mesh bb min=(" << mbb.min.x() << "," << mbb.min.y() << "," << mbb.min.z()
+            << ") max=(" << mbb.max.x() << "," << mbb.max.y() << "," << mbb.max.z() << ")"
+            << " center_offset=(" << unscale<double>(m_center_offset.x()) << "," << unscale<double>(m_center_offset.y()) << ")"
+            << " center_shift=(" << center_shift.x() << "," << center_shift.y() << ")"
+            << " ground_level=" << imesh.ground_level()
+            << " layers=" << m_layers.size();
+        // Log first point of first perimeter on layer 2
+        if (m_layers.size() > 2) {
+            Layer *l2 = m_layers[2];
+            for (LayerRegion *r : l2->regions()) {
+                for (ExtrusionEntity *e : r->perimeters.entities) {
+                    ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
+                    if (loop && !loop->paths.empty()) {
+                        auto &pts = loop->paths.front().polyline.points;
+                        if (!pts.empty()) {
+                            BOOST_LOG_TRIVIAL(warning) << "ZAA layer2 first_perim_point=("
+                                << unscale_(pts.front().x()) << "," << unscale_(pts.front().y()) << ")"
+                                << " print_z=" << l2->print_z;
+                            goto done_debug;
+                        }
+                    }
+                }
+            }
+            done_debug:;
+        }
+    }
+
     std::mutex mtx;
     size_t completed = 0;
     tbb::parallel_for(
