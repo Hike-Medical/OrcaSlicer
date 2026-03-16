@@ -123,6 +123,15 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 			d = 0;
 		}
 
+		// Skip contouring for points outside original mesh boundary
+		// (e.g. overhang-expanded areas from make_overhang_printable).
+		// If no mesh above (up=inf) and closest surface below is steep
+		// (normal mostly horizontal), the point is on an expanded overhang
+		// shelf, not a genuine top surface — force d=0.
+		if (std::abs(d) > EPSILON && std::isinf(up) && !std::isinf(down) && slope_degrees > 50.0) {
+			d = 0;
+		}
+
 		return d;
 	};
 
