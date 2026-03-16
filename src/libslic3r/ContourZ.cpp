@@ -54,24 +54,22 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 	const Points3 &points = path.polyline.points;
 	double resolution_mm = 0.1;
 
-	// Debug: log first few paths
+	// Debug: log first few outer wall paths to /tmp/zaa_contour_debug.txt
 	int cnt = s_zaa_debug_counter.fetch_add(1);
-	if (cnt < 10) {
-		BOOST_LOG_TRIVIAL(warning) << "ZAA contour_extrusion_path: role=" << path.role()
-			<< " layer_z=" << layer->print_z
-			<< " mesh_z=" << mesh_z
-			<< " ground_level=" << mesh.ground_level()
-			<< " height=" << layer->height
-			<< " min_z_cfg=" << min_z
-			<< " points=" << points.size()
-			<< " width=" << path.width;
-		if (!points.empty()) {
-			Vec2d p0(unscale_(points.front().x()), unscale_(points.front().y()));
-			sla::IndexedMesh::hit_result h_up = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, 1.0});
-			sla::IndexedMesh::hit_result h_dn = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, -1.0});
-			BOOST_LOG_TRIVIAL(warning) << "ZAA raycast at (" << p0.x() << "," << p0.y() << "," << mesh_z
-				<< "): up=" << h_up.distance() << " down=" << h_dn.distance()
-				<< " is_inside=" << h_up.is_inside();
+	if (cnt < 20 && path.role() == erExternalPerimeter) {
+		FILE *df = fopen("/tmp/zaa_contour_debug.txt", "a");
+		if (df) {
+			fprintf(df, "--- path %d: role=ExternalPerimeter layer_id=%zu layer_z=%.4f mesh_z=%.4f height=%.4f points=%zu\n",
+				cnt, layer->id(), layer->print_z, mesh_z, layer->height, points.size());
+			if (!points.empty()) {
+				Vec2d p0(unscale_(points.front().x()), unscale_(points.front().y()));
+				sla::IndexedMesh::hit_result h_up = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, 1.0});
+				sla::IndexedMesh::hit_result h_dn = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, -1.0});
+				double up = h_up.distance(), dn = h_dn.distance();
+				double d = up < dn ? up : -dn;
+				fprintf(df, "  first_pt=(%.4f, %.4f) up=%.4f down=%.4f d=%.4f\n", p0.x(), p0.y(), up, dn, d);
+			}
+			fclose(df);
 		}
 	}
 
@@ -165,6 +163,26 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 		return false;
 	}
 
+	// Debug: log when outer wall gets contoured (this causes jagged walls)
+	if (path.role() == erExternalPerimeter && cnt < 20) {
+		FILE *df = fopen("/tmp/zaa_contour_debug.txt", "a");
+		if (df) {
+			// Find the point with max |d| to understand what triggered was_contoured
+			double max_abs_d = 0;
+			size_t max_idx = 0;
+			for (size_t i = 0; i < contoured_points.size(); i++) {
+				if (std::abs(contoured_points[i].z()) > max_abs_d) {
+					max_abs_d = std::abs(contoured_points[i].z());
+					max_idx = i;
+				}
+			}
+			fprintf(df, "  WAS_CONTOURED! points=%zu max_d=%.6f at idx=%zu (%.4f, %.4f)\n",
+				contoured_points.size(), contoured_points[max_idx].z(), max_idx,
+				contoured_points[max_idx].x(), contoured_points[max_idx].y());
+			fclose(df);
+		}
+	}
+
 	Polyline3 polyline;
 	for (const Vec3d &point : contoured_points) {
 		polyline.append(Point3(scale_(point.x()), scale_(point.y()), scale_(point.z())));
@@ -223,16 +241,8 @@ static void contour_extrusion_entity(LayerRegion *region, const sla::IndexedMesh
 	// Other types (ExtrusionPathSloped, ExtrusionLoopSloped) — skip silently
 }
 
-static std::atomic<int> s_zaa_collection_debug{0};
-
 static void handle_extrusion_collection(LayerRegion *region, const sla::IndexedMesh &mesh, ExtrusionEntityCollection &collection, std::initializer_list<ExtrusionRole> roles) {
-	int dbg = s_zaa_collection_debug.fetch_add(1);
 	for (ExtrusionEntity *extr : collection.entities) {
-		if (dbg < 5) {
-			BOOST_LOG_TRIVIAL(warning) << "ZAA handle_collection: entity role=" << extr->role()
-				<< " type=" << typeid(*extr).name()
-				<< " accepted=" << (contains(roles, extr->role()) ? "YES" : "NO");
-		}
 		if (!contains(roles, extr->role())) {
 			continue;
 		}
@@ -240,22 +250,8 @@ static void handle_extrusion_collection(LayerRegion *region, const sla::IndexedM
 	}
 }
 
-static std::atomic<int> s_zaa_layer_debug{0};
-
 void Layer::make_contour_z(const sla::IndexedMesh &mesh)
 {
-	int dbg = s_zaa_layer_debug.fetch_add(1);
-	if (dbg < 3) {
-		BOOST_LOG_TRIVIAL(warning) << "ZAA make_contour_z: layer print_z=" << this->print_z
-			<< " height=" << this->height
-			<< " regions=" << this->regions().size()
-			<< " ground_level=" << mesh.ground_level();
-		for (size_t i = 0; i < this->regions().size(); i++) {
-			LayerRegion *r = this->regions()[i];
-			BOOST_LOG_TRIVIAL(warning) << "ZAA   region[" << i << "]: fills=" << r->fills.entities.size()
-				<< " perimeters=" << r->perimeters.entities.size();
-		}
-	}
 	for (LayerRegion *region : this->regions()) {
 		handle_extrusion_collection(region, mesh, region->fills, {erTopSolidInfill, erIroning, erExternalPerimeter, erMixed});
 		handle_extrusion_collection(region, mesh, region->perimeters, {erExternalPerimeter, erMixed});
