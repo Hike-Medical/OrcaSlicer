@@ -79,8 +79,28 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 	Pointf3s contoured_points;
 	bool was_contoured = false;
 
+	// If lslices_original is populated (make_overhang_printable active),
+	// use it to filter out points in overhang-expanded areas.
+	const ExPolygons &orig_slices = layer->lslices_original;
+	bool has_orig_slices = !orig_slices.empty();
+
 	// Helper lambda: compute clamped Z offset d for a given XY point
 	auto compute_d = [&](double x, double y) -> double {
+		// Skip contouring for points outside original mesh footprint
+		// (overhang-expanded areas where raycast against original mesh is unreliable)
+		if (has_orig_slices) {
+			Point pt(scale_(x), scale_(y));
+			bool inside = false;
+			for (const ExPolygon &ep : orig_slices) {
+				if (ep.contains(pt)) {
+					inside = true;
+					break;
+				}
+			}
+			if (!inside)
+				return 0.0;
+		}
+
 		sla::IndexedMesh::hit_result hit_up = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, 1.0});
 		sla::IndexedMesh::hit_result hit_down = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, -1.0});
 
@@ -120,15 +140,6 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 		}
 
 		if (path.role() == erExternalPerimeter && d > 0) {
-			d = 0;
-		}
-
-		// Skip contouring for points outside original mesh boundary
-		// (e.g. overhang-expanded areas from make_overhang_printable).
-		// If no mesh above (up=inf) and closest surface below is steep
-		// (normal mostly horizontal), the point is on an expanded overhang
-		// shelf, not a genuine top surface — force d=0.
-		if (std::abs(d) > EPSILON && std::isinf(up) && !std::isinf(down) && slope_degrees > 50.0) {
 			d = 0;
 		}
 

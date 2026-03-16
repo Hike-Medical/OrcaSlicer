@@ -1175,6 +1175,15 @@ void PrintObject::slice_volumes()
         m_layers.back()->upper_layer = nullptr;
     m_print->throw_if_canceled();
 
+    // Save original lslices before overhang expansion for ZAA filtering.
+    // ContourZ raycasts against the original mesh, so paths in overhang-expanded
+    // areas (outside original mesh) get incorrect Z offsets. These saved contours
+    // let contour_z() skip points outside the original footprint.
+    if (this->config().zaa_enabled && this->config().make_overhang_printable) {
+        for (Layer *layer : m_layers)
+            layer->lslices_original = layer->lslices;
+    }
+
     this->apply_conical_overhang();
 
     // Is any ModelVolume multi-material painted?
