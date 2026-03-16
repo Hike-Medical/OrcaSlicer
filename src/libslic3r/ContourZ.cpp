@@ -79,83 +79,104 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 	Pointf3s contoured_points;
 	bool was_contoured = false;
 
+	// Helper lambda: compute clamped Z offset d for a given XY point
+	auto compute_d = [&](double x, double y) -> double {
+		sla::IndexedMesh::hit_result hit_up = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, 1.0});
+		sla::IndexedMesh::hit_result hit_down = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, -1.0});
+
+		double up = hit_up.distance();
+		double down = hit_down.distance();
+		double d = up < down ? up : -down;
+		const Vec3d &normal = (up < down ? hit_up : hit_down).normal();
+
+		double max_up = min_z;
+		double min_down_val = -(height - min_z);
+		double half_width = path.width / 2.0;
+		if (path.role() == erIroning) {
+			max_up = height;
+			min_down_val = -(height + 0.1);
+		}
+
+		double slope_rad = slope_from_normal(normal);
+		double slope_degrees = slope_rad * 180.0 / M_PI;
+
+		if (d > min_down_val && minimize_perimeter_height_angle > 0 && minimize_perimeter_height_angle < slope_degrees && path.role() == erExternalPerimeter) {
+			double adjustment = follow_slope_down(slope_rad, half_width);
+			if (adjustment > 0) {
+				throw RuntimeError("ContourZ: got positive adjustment");
+			}
+			d += adjustment;
+			if (d < min_down_val) {
+				d = min_down_val;
+			}
+		}
+
+		if (d > max_up + 0.03 || d < min_down_val) {
+			d = 0;
+		} else {
+			if (d > max_up) {
+				d = max_up;
+			}
+		}
+
+		if (path.role() == erExternalPerimeter && d > 0) {
+			d = 0;
+		}
+
+		return d;
+	};
+
+	// Add the first original point
+	{
+		Vec2d p0(unscale_(points.front().x()), unscale_(points.front().y()));
+		double d0 = compute_d(p0.x(), p0.y());
+		if (std::abs(d0) > EPSILON) was_contoured = true;
+		contoured_points.push_back({p0.x(), p0.y(), d0});
+	}
+
 	for (Points3::const_iterator it = points.begin(); it != points.end()-1; ++it) {
 		Vec2d p1d(unscale_(it->x()), unscale_(it->y()));
 		Vec2d p2d(unscale_((it+1)->x()), unscale_((it+1)->y()));
-		Linef line(p1d, p2d);
 
-		Vec2d delta = line.b - line.a;
+		Vec2d delta = p2d - p1d;
 		double length_mm = delta.norm();
 		int num_segments = int(std::ceil(length_mm / resolution_mm));
 
-		for (int i = 0; i < num_segments+1; i++) {
-			Vec2d p = p1d + delta*i/num_segments;
+		// Compute d for all subdivided points in this segment (single pass)
+		std::vector<std::pair<Vec2d, double>> sub_points;
+		bool segment_has_contour = false;
+		for (int i = 1; i <= num_segments; i++) {
+			Vec2d p = p1d + delta * i / num_segments;
+			double d = compute_d(p.x(), p.y());
+			sub_points.push_back({p, d});
+			if (std::abs(d) > EPSILON)
+				segment_has_contour = true;
+		}
 
-			coordf_t x = p.x();
-			coordf_t y = p.y();
+		if (!segment_has_contour) {
+			// All d=0 in this segment: emit only the original endpoint.
+			// This preserves the original curve geometry from the slicer.
+			contoured_points.push_back({p2d.x(), p2d.y(), 0.0});
+		} else {
+			// This segment has Z variation: emit all subdivided points
+			was_contoured = true;
+			for (auto &[p, d] : sub_points) {
+				Vec3d new_point = {p.x(), p.y(), d};
 
-			sla::IndexedMesh::hit_result hit_up = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, 1.0});
-			sla::IndexedMesh::hit_result hit_down = mesh.query_ray_hit({x, y, mesh_z}, {0.0, 0.0, -1.0});
-
-			double up = hit_up.distance();
-			double down = hit_down.distance();
-			double d = up < down ? up : -down;
-			const Vec3d &normal = (up < down ? hit_up : hit_down).normal();
-
-			double max_up = min_z;
-			double min_down = -(height - min_z);
-			double half_width = path.width / 2.0;
-			if (path.role() == erIroning) {
-				max_up = height;
-				min_down = -(height + 0.1);
-			}
-
-			double slope_rad = slope_from_normal(normal);
-			double slope_degrees = slope_rad * 180.0 / M_PI;
-
-			if (d > min_down && minimize_perimeter_height_angle > 0 && minimize_perimeter_height_angle < slope_degrees && path.role() == erExternalPerimeter) {
-				double adjustment = follow_slope_down(slope_rad, half_width);
-				if (adjustment > 0) {
-					throw RuntimeError("ContourZ: got positive adjustment");
+				// Point simplification: merge collinear subdivided points
+				if (contoured_points.size() > 2) {
+					double dist = line_alg::distance_to_infinite_squared(
+						Linef3(contoured_points[contoured_points.size() - 2],
+						        contoured_points[contoured_points.size() - 1]),
+						new_point);
+					if (dist < EPSILON) {
+						contoured_points[contoured_points.size() - 1] = new_point;
+						continue;
+					}
 				}
-				d += adjustment;
-				if (d < min_down) {
-					d = min_down;
-				}
+
+				contoured_points.push_back(new_point);
 			}
-
-			if (d > max_up + 0.03 || d < min_down) {
-				d = 0;
-			} else {
-				if (d > max_up) {
-					d = max_up;
-				}
-			}
-
-			if (path.role() == erExternalPerimeter && d > 0) {
-				// do not increase height of external perimeters as this may create an appearance of a seam
-				d = 0;
-			}
-
-			if (std::abs(d) > EPSILON) {
-				was_contoured = true;
-			}
-
-			Vec3d new_point = {p.x(), p.y(), d};
-
-			// Point simplification: if the new point is collinear with the previous two, replace the last
-			if (contoured_points.size() > 2) {
-				double dist = line_alg::distance_to_infinite_squared(
-					Linef3(contoured_points[contoured_points.size() - 2],
-					        contoured_points[contoured_points.size() - 1]),
-					new_point);
-				if (dist < EPSILON) {
-					contoured_points[contoured_points.size() - 1] = new_point;
-					continue;
-				}
-			}
-
-			contoured_points.push_back(new_point);
 		}
 	}
 
