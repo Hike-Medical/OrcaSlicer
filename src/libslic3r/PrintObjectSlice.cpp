@@ -1179,7 +1179,7 @@ void PrintObject::slice_volumes()
     // ContourZ raycasts against the original mesh, so paths in overhang-expanded
     // areas (outside original mesh) get incorrect Z offsets. These saved contours
     // let contour_z() skip points outside the original footprint.
-    if (this->config().zaa_enabled && this->config().make_overhang_printable) {
+    if (this->config().zaa_enabled && this->config().make_overhang_printable_angle != 90.0) {
         for (Layer *layer : m_layers)
             layer->lslices_original = layer->lslices;
     }
