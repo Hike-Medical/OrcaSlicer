@@ -1175,14 +1175,18 @@ void PrintObject::slice_volumes()
         m_layers.back()->upper_layer = nullptr;
     m_print->throw_if_canceled();
 
-    // Save original region slices (merged) before overhang expansion for ZAA filtering.
-    // apply_conical_overhang modifies region slices (not lslices), expanding contours
-    // outward to support overhangs. ContourZ raycasts against the original mesh, so
-    // path points in overhang-expanded areas get incorrect Z offsets.
-    // We save the merged region slices to let contour_z() skip those points.
+    // Save shrunk original region slices before overhang expansion for ZAA filtering.
+    // apply_conical_overhang modifies region slices, expanding contours outward.
+    // ContourZ raycasts against the original mesh, so path points in or near
+    // overhang-expanded areas get incorrect Z offsets. We shrink the contour
+    // inward by 1mm to create a buffer zone — points near the mesh edge (where
+    // raycasts are unreliable) are skipped for ZAA contouring.
     if (this->config().zaa_enabled && this->config().make_overhang_printable_angle != 90.0) {
-        for (Layer *layer : m_layers)
-            layer->lslices_original = layer->merged(float(SCALED_EPSILON));
+        const float shrink = -float(scale_(1.0)); // 1mm inward
+        for (Layer *layer : m_layers) {
+            auto merged = layer->merged(float(SCALED_EPSILON));
+            layer->lslices_original = offset_ex(merged, shrink);
+        }
     }
 
     this->apply_conical_overhang();
