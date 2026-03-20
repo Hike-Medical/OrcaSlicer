@@ -146,19 +146,20 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 			}
 		}
 
-		if (path.role() == erExternalPerimeter && d > 0) {
-			// Debug: log first N external perimeter d values before zeroing
+		// Debug: log ALL external perimeter d values (before and after all adjustments)
+		if (path.role() == erExternalPerimeter) {
 			static int dbg_count = 0;
-			if (dbg_count < 200) {
+			if (dbg_count < 500) {
+				double d_raw = up < down ? up : -down;
 				FILE *f = fopen("/tmp/zaa_wall_debug.txt", dbg_count == 0 ? "w" : "a");
 				if (f) {
-					fprintf(f, "layer_z=%.4f x=%.4f y=%.4f mesh_z=%.4f up=%.6f down=%.6f d_before=%.6f slope=%.1f down_slope=%.1f\n",
-						layer->print_z, x, y, mesh_z, up, down, d, slope_degrees, down_slope_degrees);
+					fprintf(f, "layer_z=%.4f x=%.4f y=%.4f mesh_z=%.4f up=%.6f down=%.6f d_raw=%.6f d_final=%.6f max_up=%.4f min_down=%.4f slope=%.1f down_slope=%.1f\n",
+						layer->print_z, x, y, mesh_z, up, down, d_raw, d, max_up, min_down_val, slope_degrees, down_slope_degrees);
 					fclose(f);
 				}
 				dbg_count++;
 			}
-			d = 0;
+			if (d > 0) d = 0;
 		}
 
 		return d;
