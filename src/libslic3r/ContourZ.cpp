@@ -146,20 +146,8 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 			}
 		}
 
-		// Debug: log ALL external perimeter d values (before and after all adjustments)
-		if (path.role() == erExternalPerimeter) {
-			static int dbg_count = 0;
-			if (dbg_count < 500) {
-				double d_raw = up < down ? up : -down;
-				FILE *f = fopen("/tmp/zaa_wall_debug.txt", dbg_count == 0 ? "w" : "a");
-				if (f) {
-					fprintf(f, "layer_z=%.4f x=%.4f y=%.4f mesh_z=%.4f up=%.6f down=%.6f d_raw=%.6f d_final=%.6f max_up=%.4f min_down=%.4f slope=%.1f down_slope=%.1f\n",
-						layer->print_z, x, y, mesh_z, up, down, d_raw, d, max_up, min_down_val, slope_degrees, down_slope_degrees);
-					fclose(f);
-				}
-				dbg_count++;
-			}
-			if (d > 0) d = 0;
+		if (path.role() == erExternalPerimeter && d > 0) {
+			d = 0;
 		}
 
 		return d;
@@ -314,7 +302,7 @@ void Layer::make_contour_z(const sla::IndexedMesh &mesh)
 {
 	for (LayerRegion *region : this->regions()) {
 		handle_extrusion_collection(region, mesh, region->fills, {erTopSolidInfill, erIroning, erExternalPerimeter, erMixed});
-		handle_extrusion_collection(region, mesh, region->perimeters, {erExternalPerimeter, erMixed});
+		handle_extrusion_collection(region, mesh, region->perimeters, {erExternalPerimeter, erPerimeter, erMixed});
 	}
 }
 
