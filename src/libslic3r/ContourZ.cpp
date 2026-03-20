@@ -120,8 +120,15 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 		double slope_rad = slope_from_normal(normal);
 		double slope_degrees = slope_rad * 180.0 / M_PI;
 
-		if (d > min_down_val && minimize_perimeter_height_angle > 0 && minimize_perimeter_height_angle < slope_degrees && path.role() == erExternalPerimeter) {
-			double adjustment = follow_slope_down(slope_rad, half_width);
+		// For minimize_perimeter_height, use DOWN hit slope (side wall)
+		// instead of closest hit slope. At the mesh edge, the UP hit
+		// sees the gentle top surface while the DOWN hit sees the steep
+		// side wall that determines the actual perimeter height.
+		double down_slope_rad = slope_from_normal(hit_down.normal());
+		double down_slope_degrees = down_slope_rad * 180.0 / M_PI;
+
+		if (d > min_down_val && minimize_perimeter_height_angle > 0 && minimize_perimeter_height_angle < down_slope_degrees && path.role() == erExternalPerimeter) {
+			double adjustment = follow_slope_down(down_slope_rad, half_width);
 			if (adjustment > 0) {
 				throw RuntimeError("ContourZ: got positive adjustment");
 			}
