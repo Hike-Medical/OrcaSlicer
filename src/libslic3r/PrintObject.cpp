@@ -731,12 +731,17 @@ void PrintObject::contour_z()
     // Clear contour debug file
     { FILE *cf = fopen("/tmp/zaa_contour_debug.txt", "w"); if (cf) fclose(cf); }
 
-    // Use the same transform as the slicing pipeline (trafo_centered) to ensure
-    // the raycast mesh is in the exact same coordinate space as the extrusion paths.
-    // Previous approach (transform_mesh(true) + translate(-center_offset)) applied
-    // the center_offset subtraction AFTER rotation, while trafo_centered applies it
-    // BEFORE rotation. These give different results when the instance has rotation.
-    mesh.transform(this->trafo_centered());
+    // Use trafo_centered for XY alignment (same coordinate space as extrusion paths),
+    // but REMOVE the Z translation component. BambuStudio-ZAA does not center the mesh
+    // in Z — the mesh stays at its original Z position, giving ground_level a significant
+    // negative value. This is critical: mesh_z = print_z + ground_level puts the raycast
+    // origin well below the mesh surface, making d negative for perimeter walls on slopes.
+    // With Z translation, ground_level ≈ 0, mesh_z ≈ print_z, d ≈ 0 → walls not contoured.
+    {
+        Transform3d t = this->trafo_centered();
+        t(2, 3) = 0.0;  // Zero out Z translation
+        mesh.transform(t);
+    }
 
     sla::IndexedMesh imesh(mesh);
 
