@@ -54,24 +54,8 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 	const Points3 &points = path.polyline.points;
 	double resolution_mm = 0.1;
 
-	// Debug: log first few outer wall paths to /tmp/zaa_contour_debug.txt
+	// Debug: log ALL external perimeter paths
 	int cnt = s_zaa_debug_counter.fetch_add(1);
-	if (cnt < 20 && path.role() == erExternalPerimeter) {
-		FILE *df = fopen("/tmp/zaa_contour_debug.txt", "a");
-		if (df) {
-			fprintf(df, "--- path %d: role=ExternalPerimeter layer_id=%zu layer_z=%.4f mesh_z=%.4f height=%.4f points=%zu\n",
-				cnt, layer->id(), layer->print_z, mesh_z, layer->height, points.size());
-			if (!points.empty()) {
-				Vec2d p0(unscale_(points.front().x()), unscale_(points.front().y()));
-				sla::IndexedMesh::hit_result h_up = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, 1.0});
-				sla::IndexedMesh::hit_result h_dn = mesh.query_ray_hit({p0.x(), p0.y(), mesh_z}, {0.0, 0.0, -1.0});
-				double up = h_up.distance(), dn = h_dn.distance();
-				double d = up < dn ? up : -dn;
-				fprintf(df, "  first_pt=(%.4f, %.4f) up=%.4f down=%.4f d=%.4f\n", p0.x(), p0.y(), up, dn, d);
-			}
-			fclose(df);
-		}
-	}
 
 	coordf_t height = layer->height;
 	double minimize_perimeter_height_angle = region->region().config().zaa_minimize_perimeter_height;
@@ -213,28 +197,31 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 		}
 	}
 
-	if (!was_contoured) {
-		return false;
-	}
-
-	// Debug: log when outer wall gets contoured (this causes jagged walls)
-	if (path.role() == erExternalPerimeter && cnt < 20) {
+	// Debug: log every external perimeter path result
+	if (path.role() == erExternalPerimeter && cnt < 200) {
+		// Find max |d| in contoured_points
+		double max_abs_d = 0;
+		int nonzero_count = 0;
+		for (const auto &cp : contoured_points) {
+			if (std::abs(cp.z()) > EPSILON) nonzero_count++;
+			if (std::abs(cp.z()) > max_abs_d) max_abs_d = std::abs(cp.z());
+		}
 		FILE *df = fopen("/tmp/zaa_contour_debug.txt", "a");
 		if (df) {
-			// Find the point with max |d| to understand what triggered was_contoured
-			double max_abs_d = 0;
-			size_t max_idx = 0;
-			for (size_t i = 0; i < contoured_points.size(); i++) {
-				if (std::abs(contoured_points[i].z()) > max_abs_d) {
-					max_abs_d = std::abs(contoured_points[i].z());
-					max_idx = i;
-				}
+			fprintf(df, "path_%d layer=%zu pts_in=%zu pts_out=%zu was_contoured=%d nonzero_d=%d max_d=%.6f\n",
+				cnt, layer->id(), points.size(), contoured_points.size(),
+				was_contoured ? 1 : 0, nonzero_count, max_abs_d);
+			// Log first few points with d values
+			for (size_t i = 0; i < std::min(contoured_points.size(), (size_t)5); i++) {
+				fprintf(df, "  [%zu] x=%.3f y=%.3f d=%.6f\n", i,
+					contoured_points[i].x(), contoured_points[i].y(), contoured_points[i].z());
 			}
-			fprintf(df, "  WAS_CONTOURED! points=%zu max_d=%.6f at idx=%zu (%.4f, %.4f)\n",
-				contoured_points.size(), contoured_points[max_idx].z(), max_idx,
-				contoured_points[max_idx].x(), contoured_points[max_idx].y());
 			fclose(df);
 		}
+	}
+
+	if (!was_contoured) {
+		return false;
 	}
 
 	Polyline3 polyline;
