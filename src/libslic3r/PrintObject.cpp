@@ -842,6 +842,45 @@ void PrintObject::contour_z()
     m_print->throw_if_canceled();
     BOOST_LOG_TRIVIAL(debug) << "Contouring in parallel - end";
 
+    // Debug: count z_contoured paths
+    {
+        int total_contoured = 0, total_perim_contoured = 0, total_paths = 0;
+        for (Layer *layer : m_layers) {
+            for (LayerRegion *r : layer->regions()) {
+                for (ExtrusionEntity *e : r->perimeters.entities) {
+                    auto count_paths = [&](ExtrusionEntity *ent) {
+                        // Lambda to recursively count
+                    };
+                    ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
+                    if (loop) {
+                        for (auto &p : loop->paths) {
+                            total_paths++;
+                            if (p.z_contoured) { total_contoured++; total_perim_contoured++; }
+                        }
+                    }
+                    ExtrusionEntityCollection *coll = dynamic_cast<ExtrusionEntityCollection*>(e);
+                    if (coll) {
+                        for (ExtrusionEntity *inner : coll->entities) {
+                            ExtrusionLoop *il = dynamic_cast<ExtrusionLoop*>(inner);
+                            if (il) {
+                                for (auto &p : il->paths) {
+                                    total_paths++;
+                                    if (p.z_contoured) { total_contoured++; total_perim_contoured++; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        FILE *df = fopen("/tmp/zaa_debug.txt", "a");
+        if (df) {
+            fprintf(df, "z_contoured_stats: total_paths=%d contoured=%d perim_contoured=%d\n",
+                total_paths, total_contoured, total_perim_contoured);
+            fclose(df);
+        }
+    }
+
     this->set_done(posContouring);
 }
 
