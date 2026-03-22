@@ -296,8 +296,22 @@ static void contour_extrusion_entity(LayerRegion *region, const sla::IndexedMesh
 }
 
 static void handle_extrusion_collection(LayerRegion *region, const sla::IndexedMesh &mesh, ExtrusionEntityCollection &collection, std::initializer_list<ExtrusionRole> roles) {
+	static std::atomic<int> s_filter_debug{0};
 	for (ExtrusionEntity *extr : collection.entities) {
 		if (!contains(roles, extr->role())) {
+			int fc = s_filter_debug.fetch_add(1);
+			if (fc < 50) {
+				FILE *df = fopen("/tmp/zaa_filter_debug.txt", "a");
+				if (df) {
+					fprintf(df, "FILTERED layer=%zu role=%s type=%s\n",
+						region->layer()->id(),
+						ExtrusionEntity::role_to_string(extr->role()).c_str(),
+						dynamic_cast<ExtrusionLoop*>(extr) ? "Loop" :
+						dynamic_cast<ExtrusionEntityCollection*>(extr) ? "Collection" :
+						dynamic_cast<ExtrusionPath*>(extr) ? "Path" : "Other");
+					fclose(df);
+				}
+			}
 			continue;
 		}
 		contour_extrusion_entity(region, mesh, extr);
@@ -308,7 +322,12 @@ void Layer::make_contour_z(const sla::IndexedMesh &mesh)
 {
 	for (LayerRegion *region : this->regions()) {
 		handle_extrusion_collection(region, mesh, region->fills, {erTopSolidInfill, erIroning, erExternalPerimeter, erMixed});
-		handle_extrusion_collection(region, mesh, region->perimeters, {erExternalPerimeter, erPerimeter, erMixed});
+		// Process ALL perimeter entities — OrcaSlicer wraps them in collections
+		// with various top-level roles. The path-level filter in contour_extrusion_path
+		// already checks for erExternalPerimeter/erPerimeter.
+		for (ExtrusionEntity *extr : region->perimeters.entities) {
+			contour_extrusion_entity(region, mesh, extr);
+		}
 	}
 }
 
