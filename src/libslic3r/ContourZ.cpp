@@ -146,9 +146,15 @@ static bool contour_extrusion_path(LayerRegion *region, const sla::IndexedMesh &
 			}
 		}
 
-		if (path.role() == erExternalPerimeter && d > 0) {
-			d = 0;
-		}
+		// BambuStudio-ZAA zeros d>0 for external perimeters to avoid seam appearance.
+		// However, this relies on ground_level being large negative (from 3MF project
+		// transforms), making d naturally negative for walls. In OrcaSlicer CLI mode,
+		// objects are placed on bed (ground_level≈0), so d is near-zero or slightly
+		// positive for walls — zeroing kills all wall contouring.
+		// Fix: only zero d that exceeds max_up (already clamped above). Small positive
+		// d values (0 to max_up=0.05mm) are physically acceptable and needed for
+		// wall contouring when ground_level≈0.
+		// The clamping block above already handles d > max_up + 0.03 → d = 0.
 
 		return d;
 	};
