@@ -1181,7 +1181,7 @@ void PrintObject::slice_volumes()
     // overhang-expanded areas get incorrect Z offsets. We shrink the contour
     // inward by 1mm to create a buffer zone — points near the mesh edge (where
     // raycasts are unreliable) are skipped for ZAA contouring.
-    if (this->config().zaa_enabled && this->config().make_overhang_printable_angle != 90.0) {
+    if (this->config().zaa_enabled && this->config().make_overhang_printable) {
         const float shrink = -float(scale_(1.0)); // 1mm inward
         for (Layer *layer : m_layers) {
             auto merged = layer->merged(float(SCALED_EPSILON));
