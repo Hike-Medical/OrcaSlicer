@@ -731,17 +731,22 @@ void PrintObject::contour_z()
     // Clear contour debug file
     { FILE *cf = fopen("/tmp/zaa_contour_debug.txt", "w"); if (cf) fclose(cf); }
 
-    // Use trafo_centered for XY alignment (same coordinate space as extrusion paths),
-    // but REMOVE the Z translation component. BambuStudio-ZAA does not center the mesh
-    // in Z — the mesh stays at its original Z position, giving ground_level a significant
-    // negative value. This is critical: mesh_z = print_z + ground_level puts the raycast
-    // origin well below the mesh surface, making d negative for perimeter walls on slopes.
-    // With Z translation, ground_level ≈ 0, mesh_z ≈ print_z, d ≈ 0 → walls not contoured.
-    {
-        Transform3d t = this->trafo_centered();
-        t(2, 3) = 0.0;  // Zero out Z translation
-        mesh.transform(t);
-    }
+    // Match BambuStudio-ZAA: apply instance rotation/scale but NO translation.
+    // BambuStudio uses transform_mesh(true) which calls get_matrix(dont_translate=true).
+    // The mesh stays at its raw_mesh() coordinates (not centered, not on-bed).
+    // This gives ground_level = mesh.min.z() which is typically a large negative value.
+    // mesh_z = print_z + ground_level puts the raycast origin well below the mesh surface,
+    // making d negative for perimeter walls on slopes → walls follow the surface contour.
+    //
+    // We cannot use trafo_centered() because it includes XY centering AND places the mesh
+    // on the bed (Z=0), making ground_level ≈ 0 → d ≈ 0 → walls not contoured.
+    //
+    // For XY alignment with extrusion paths (which use center_offset), we apply the
+    // center_offset shift separately AFTER the rotation, matching what the slicing pipeline does.
+    model_object()->instances.front()->transform_mesh(&mesh, true);
+    Vec3d center_shift(- unscale<double>(m_center_offset.x()),
+                       - unscale<double>(m_center_offset.y()), 0.0);
+    mesh.translate(center_shift.x(), center_shift.y(), center_shift.z());
 
     sla::IndexedMesh imesh(mesh);
 
