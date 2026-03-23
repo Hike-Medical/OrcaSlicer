@@ -6740,7 +6740,13 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
 
                         double extrusion_ratio = 1;
                         if (path.role() != erIroning) {
-                            extrusion_ratio = (path.height + z_diff) / path.height;
+                            // Use abs(z_diff): both uphill and downhill get reduced flow.
+                            // The previous layer is also Z-contoured, so the actual gap
+                            // between layers is ~path.height regardless of slope direction.
+                            // Reducing flow on slopes prevents excess material squeezing
+                            // out sideways (visible as alternating high/low flow bands).
+                            extrusion_ratio = (path.height - std::abs(z_diff)) / path.height;
+                            if (extrusion_ratio < 0.3) extrusion_ratio = 0.3;
                         }
 
                         double e = e_per_mm * line_length * extrusion_ratio;
