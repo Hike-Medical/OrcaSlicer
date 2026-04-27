@@ -1175,10 +1175,17 @@ void PrintObject::slice_volumes()
         m_layers.back()->upper_layer = nullptr;
     m_print->throw_if_canceled();
 
-    // ZAA + make_overhang_printable: lslices_original filter disabled.
-    // Previous approach (shrink original contour by 1mm) killed all edge wall contouring.
-    // TODO: if overhang artifact returns, implement precise difference-zone filtering
-    // (only skip points in the expanded-minus-original region).
+    // Save original region slices before overhang expansion for ZAA filtering.
+    // ContourZ will skip points that are OUTSIDE the original contour
+    // (i.e. in the overhang-expanded zone only). No shrink applied —
+    // points inside or on the boundary of the original contour get normal ZAA.
+    bool overhang_printable = false;
+    if (!m_layers.empty() && !m_layers.front()->regions().empty())
+        overhang_printable = m_layers.front()->regions().front()->region().config().make_overhang_printable;
+    if (this->config().zaa_enabled && overhang_printable) {
+        for (Layer *layer : m_layers)
+            layer->lslices_original = layer->merged(float(SCALED_EPSILON));
+    }
 
     this->apply_conical_overhang();
 
