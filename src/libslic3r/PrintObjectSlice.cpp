@@ -1176,15 +1176,28 @@ void PrintObject::slice_volumes()
     m_print->throw_if_canceled();
 
     // Save original region slices before overhang expansion for ZAA filtering.
-    // ContourZ will skip points that are OUTSIDE the original contour
-    // (i.e. in the overhang-expanded zone only). No shrink applied —
-    // points inside or on the boundary of the original contour get normal ZAA.
+    // ContourZ will skip points that are OUTSIDE the original contour shrunk by
+    // half perimeter width — these points represent perimeters pushed outward by
+    // overhang expansion (where raycast against original mesh creates artifacts).
+    // Points inside the shrunk contour get normal ZAA.
     bool overhang_printable = false;
     if (!m_layers.empty() && !m_layers.front()->regions().empty())
         overhang_printable = m_layers.front()->regions().front()->region().config().make_overhang_printable;
     if (this->config().zaa_enabled && overhang_printable) {
-        for (Layer *layer : m_layers)
-            layer->lslices_original = layer->merged(float(SCALED_EPSILON));
+        // Shrink by half external perimeter width to detect overhang-expanded perimeters
+        double half_width = 0.4; // default for 0.8 nozzle
+        if (!m_layers.empty() && !m_layers.front()->regions().empty()) {
+            const auto &region_config = m_layers.front()->regions().front()->region().config();
+            double ext_width = region_config.outer_wall_line_width.value;
+            if (ext_width <= 0)
+                ext_width = m_print->config().nozzle_diameter.values.empty() ? 0.8 : m_print->config().nozzle_diameter.values.front();
+            half_width = ext_width * 0.5;
+        }
+        coord_t shrink = scale_(half_width);
+        for (Layer *layer : m_layers) {
+            ExPolygons merged = layer->merged(float(SCALED_EPSILON));
+            layer->lslices_original = offset_ex(merged, -shrink);
+        }
     }
 
     this->apply_conical_overhang();
