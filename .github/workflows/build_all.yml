@@ -2,6 +2,8 @@ name: Build all
 
 on:
   push:
+    branches:
+      - main
     paths:
      - 'deps/**'
      - 'src/**'

@@ -1,14 +1,4 @@
 on:
-  push:
-    paths:
-      - '**.sh'
-      - 'scripts/linux.d/*'
-  pull_request:
-    paths:
-      - '**.sh'
-      - 'scripts/linux.d/*'
-  schedule:
-      - cron: '55 7 * * *' # run once a day near midnight US Pacific time
   workflow_dispatch: # allows for manual dispatch
 
 name: "Shellcheck"
