@@ -64,11 +64,26 @@ jobs:
         if: inputs.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          ./build_linux.sh -istr
-          mv -n ./build/OrcaSlicer_Linux_V${{ env.ver_pure }}.AppImage \
-                ./build/SoleSlicer_${{ env.ver }}_linux_amd64.AppImage
-          chmod +x ./build/SoleSlicer_${{ env.ver }}_linux_amd64.AppImage
+          ./build_linux.sh -str
           tar -cvpf build_tests.tar build/tests
+
+      - name: Collect CLI binary and shared libs
+        if: inputs.os == 'ubuntu-24.04'
+        run: |
+          mkdir -p artifact
+          BINARY=$(find build/ -name "orca-slicer" -type f -exec file {} \; | grep ELF | head -1 | cut -d: -f1)
+          if [ -z "$BINARY" ]; then
+            echo "ERROR: orca-slicer ELF binary not found"
+            find build/src/ -type f -executable 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "Found binary: $BINARY ($(du -h "$BINARY" | cut -f1))"
+          cp "$BINARY" artifact/orca-slicer
+          chmod +x artifact/orca-slicer
+          ldd "$BINARY" | grep "=> /" | awk '{print $3}' | \
+            xargs -I{} cp -n {} artifact/ 2>/dev/null || true
+          cp -r resources artifact/resources || true
+          ls -lh artifact/
 
       - name: Upload Test Artifact
         if: inputs.os == 'ubuntu-24.04'
@@ -80,9 +95,9 @@ jobs:
           retention-days: 5
           if-no-files-found: error
 
-      - name: Upload SoleSlicer AppImage
+      - name: Upload SoleSlicer CLI
         if: inputs.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v6
         with:
           name: SoleSlicer_${{ env.ver }}_linux_amd64
-          path: './build/SoleSlicer_${{ env.ver }}_linux_amd64.AppImage'
+          path: artifact/

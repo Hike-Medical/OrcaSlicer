@@ -33,7 +33,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Download Linux AppImage artifact
+      - name: Download SoleSlicer CLI artifact
         uses: actions/download-artifact@v7
         with:
           pattern: SoleSlicer_*_linux_amd64
@@ -43,16 +43,15 @@ jobs:
       - name: Package tarball
         id: package
         run: |
-          APPIMAGE=$(find artifact -type f -name "*.AppImage" | head -1)
-          if [ -z "$APPIMAGE" ]; then
-            echo "ERROR: No AppImage found in artifact"
+          if [ ! -f artifact/orca-slicer ]; then
+            echo "ERROR: orca-slicer binary not found in artifact"
             find artifact -type f
             exit 1
           fi
-          echo "Found AppImage: $APPIMAGE"
+          echo "Found CLI binary: $(du -h artifact/orca-slicer | cut -f1)"
 
           TARBALL="soleslicer-linux-amd64.tar.gz"
-          tar -czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"
+          tar -czf "$TARBALL" -C artifact .
           SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
 
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
