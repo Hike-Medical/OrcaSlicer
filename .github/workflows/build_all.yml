@@ -2,9 +2,6 @@ name: Build all
 
 on:
   push:
-    branches:
-     - main
-     - release/*
     paths:
      - 'deps/**'
      - 'src/**'
@@ -16,9 +13,6 @@ on:
      - 'build_linux.sh'
 
   pull_request:
-    branches:
-     - main
-     - release/*
     paths:
      - 'deps/**'
      - 'deps_src/**'
