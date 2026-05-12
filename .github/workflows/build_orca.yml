@@ -64,7 +64,7 @@ jobs:
         if: inputs.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          ./build_linux.sh -sr
+          ./build_linux.sh -sr -j "$(nproc)"
 
       - name: Collect CLI binary and shared libs
         if: inputs.os == 'ubuntu-24.04'
