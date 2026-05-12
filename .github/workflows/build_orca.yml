@@ -22,6 +22,7 @@ jobs:
       date:
       ver:
       ver_pure:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
       - name: Checkout
@@ -35,6 +36,16 @@ jobs:
           path: ${{ inputs.cache-path }}
           key: ${{ inputs.cache-key }}
           fail-on-cache-miss: true
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ inputs.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ inputs.os }}-${{ github.ref_name }}-
+            ccache-${{ inputs.os }}-main-
+            ccache-${{ inputs.os }}-
 
       - uses: lukka/get-cmake@latest
         with:
@@ -60,11 +71,26 @@ jobs:
         if: inputs.os == 'ubuntu-24.04'
         uses: ./.github/actions/apt-install-deps
 
+      - name: Install ccache
+        if: inputs.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get install -y ccache
+          ccache --version
+          ccache --zero-stats
+          ccache --max-size=1G
+
       - name: Build slicer CLI
         if: inputs.os == 'ubuntu-24.04'
         shell: bash
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           ./build_linux.sh -sr -j "$(nproc)"
+
+      - name: Print ccache stats
+        if: inputs.os == 'ubuntu-24.04'
+        run: ccache --show-stats
 
       - name: Collect CLI binary and shared libs
         if: inputs.os == 'ubuntu-24.04'
