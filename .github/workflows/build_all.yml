@@ -44,3 +44,101 @@ jobs:
       os: ubuntu-24.04
       build-deps-only: ${{ inputs.build-deps-only || false }}
     secrets: inherit
+
+  upload-to-s3:
+    name: Upload to S3
+    needs: build_linux
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ARTIFACT_BUCKET: ${{ secrets.SOLESLICER_ARTIFACT_BUCKET }}
+    steps:
+      - name: Preflight – verify required secrets
+        run: |
+          failed=0
+          for secret_name in AWS_REGION ARTIFACT_BUCKET; do
+            val=$(eval echo "\$$secret_name")
+            if [ -z "$val" ]; then
+              echo "::error::Required secret ${secret_name} is not set"
+              failed=1
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then exit 1; fi
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ARTIFACT_BUCKET: ${{ secrets.SOLESLICER_ARTIFACT_BUCKET }}
+
+      - name: Checkout (for version)
+        uses: actions/checkout@v6
+
+      - name: Resolve version
+        id: meta
+        run: |
+          VER=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Resolved: version=$VER"
+
+      - name: Download SoleSlicer CLI artifact
+        uses: actions/download-artifact@v7
+        with:
+          pattern: soleslicer-*-linux-amd64
+          path: artifact
+          merge-multiple: true
+
+      - name: Verify artifact contents
+        run: |
+          echo "=== Artifact contents ==="
+          find artifact -type f | head -30
+          if [ ! -f artifact/orca-slicer ]; then
+            echo "::error::orca-slicer binary not found in downloaded artifact"
+            exit 1
+          fi
+          file artifact/orca-slicer
+          echo "Binary size: $(du -h artifact/orca-slicer | cut -f1)"
+
+      - name: Package tarball
+        id: package
+        run: |
+          TARBALL="soleslicer-linux-amd64.tar.gz"
+          tar -czf "$TARBALL" -C artifact .
+          SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
+
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Tarball: $TARBALL ($(du -h "$TARBALL" | cut -f1), sha256: $SHA256)"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS access
+        run: aws sts get-caller-identity
+
+      - name: Upload to S3
+        env:
+          VER: ${{ steps.meta.outputs.version }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/soleslicer-linux-amd64.tar.gz"
+          echo "Uploading to ${S3_PATH} ..."
+          aws s3 cp "$TARBALL" "$S3_PATH" \
+            --metadata "sha256=${SHA256},version=${VER}"
+
+          echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
+          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/sha256.txt"
+
+          echo ""
+          echo "=== Uploaded SoleSlicer v${VER} ==="
+          echo "  ${S3_PATH}"
+          echo "  SHA256: ${SHA256}"
+
+      - name: Verify S3 upload
+        env:
+          VER: ${{ steps.meta.outputs.version }}
+        run: |
+          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/"

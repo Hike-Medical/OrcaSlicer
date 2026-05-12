@@ -41,14 +41,12 @@ jobs:
       - name: Resolve version label
         run: |
           ver_pure=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            ver="PR-${{ github.event.number }}"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            ver="${{ github.ref_name }}"
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            branch="${{ github.ref_name }}"
           else
             branch="${{ github.ref_name }}"
-            ver="${branch//\//-}"
           fi
+          ver=$(echo "$branch" | tr '[:upper:]/' '[:lower:]-')
           echo "ver=$ver" >> $GITHUB_ENV
           echo "ver_pure=$ver_pure" >> $GITHUB_ENV
         shell: bash
@@ -78,7 +76,7 @@ jobs:
       - name: Upload SoleSlicer CLI
         uses: actions/upload-artifact@v6
         with:
-          name: SoleSlicer_${{ env.ver }}_linux_amd64
+          name: soleslicer-${{ env.ver }}-linux-amd64
           path: artifact/
 
   publish-linux:
@@ -106,24 +104,17 @@ jobs:
       - name: Checkout (for version)
         uses: actions/checkout@v6
 
-      - name: Resolve version and SHA
+      - name: Resolve version
         id: meta
         run: |
           VER=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          SHA="${{ github.sha }}"
-          TAG="${{ github.event.release.tag_name }}"
-          if [ -z "$TAG" ]; then
-            TAG="manual"
-          fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved: version=$VER sha=$SHA tag=$TAG"
+          echo "Resolved: version=$VER"
 
       - name: Download SoleSlicer CLI artifact
         uses: actions/download-artifact@v7
         with:
-          pattern: SoleSlicer_*_linux_amd64
+          pattern: soleslicer-*-linux-amd64
           path: artifact
           merge-multiple: true
 
@@ -161,34 +152,25 @@ jobs:
 
       - name: Upload to S3
         env:
-          SHA: ${{ steps.meta.outputs.sha }}
           VER: ${{ steps.meta.outputs.version }}
-          TAG: ${{ steps.meta.outputs.tag }}
           TARBALL: ${{ steps.package.outputs.tarball }}
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
-          S3_BASE="s3://${ARTIFACT_BUCKET}/soleslicer"
-
-          for PREFIX in "${SHA}" "${TAG}" "latest"; do
-            echo "Uploading to ${S3_BASE}/${PREFIX}/ ..."
-            aws s3 cp "$TARBALL" "${S3_BASE}/${PREFIX}/soleslicer-linux-amd64.tar.gz" \
-              --metadata "sha256=${SHA256},version=${VER},commit=${SHA},tag=${TAG}"
-          done
+          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/soleslicer-linux-amd64.tar.gz"
+          echo "Uploading to ${S3_PATH} ..."
+          aws s3 cp "$TARBALL" "$S3_PATH" \
+            --metadata "sha256=${SHA256},version=${VER}"
 
           echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
-          for PREFIX in "${SHA}" "${TAG}" "latest"; do
-            aws s3 cp sha256.txt "${S3_BASE}/${PREFIX}/sha256.txt"
-          done
+          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/sha256.txt"
 
           echo ""
-          echo "=== Published SoleSlicer v${VER} (${TAG}) ==="
-          echo "  s3://${ARTIFACT_BUCKET}/soleslicer/${TAG}/soleslicer-linux-amd64.tar.gz"
-          echo "  s3://${ARTIFACT_BUCKET}/soleslicer/latest/soleslicer-linux-amd64.tar.gz"
+          echo "=== Published SoleSlicer v${VER} ==="
+          echo "  ${S3_PATH}"
           echo "  SHA256: ${SHA256}"
 
       - name: Verify S3 upload
         env:
-          TAG: ${{ steps.meta.outputs.tag }}
+          VER: ${{ steps.meta.outputs.version }}
         run: |
-          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${TAG}/"
-          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/latest/"
+          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/"
