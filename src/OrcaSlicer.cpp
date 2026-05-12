@@ -3231,6 +3231,26 @@ int CLI::run(int argc, char **argv)
         }
     }
 
+    // Ensure filament_colour is resized to match actual filament count.
+    // filament_colour defaults to 1 entry ("#F2754E") and filament profiles
+    // may not define it (e.g. same physical material at different temperatures).
+    // Code throughout the slicer uses filament_colour.size() as "number of
+    // filaments", so a size mismatch breaks SEMM tool ordering, flush matrices,
+    // and G-code generation.  filament_diameter is always set per-filament by
+    // the profiles, so use it as the authoritative size.
+    {
+        auto* fc = m_print_config.option<ConfigOptionStrings>("filament_colour", true);
+        const auto* fd = m_print_config.option<ConfigOptionFloats>("filament_diameter");
+        if (fc && fd && fc->values.size() < fd->values.size()) {
+            std::string default_color = fc->values.empty() ? "#F2754E" : fc->values[0];
+            BOOST_LOG_TRIVIAL(info) << boost::format(
+                "filament_colour size %1% < filament_diameter size %2%, "
+                "resizing filament_colour to match actual filament count")
+                % fc->values.size() % fd->values.size();
+            fc->values.resize(fd->values.size(), default_color);
+        }
+    }
+
     //compute the flush volume
     ConfigOptionStrings *selected_filament_colors_option = m_extra_config.option<ConfigOptionStrings>("filament_colour");
     ConfigOptionStrings *project_filament_colors_option = m_print_config.option<ConfigOptionStrings>("filament_colour");

@@ -97,6 +97,7 @@ set(lisbslic3r_sources
     ClipperZUtils.hpp
     Color.cpp
     Color.hpp
+    ContourZ.cpp
     CommonDefs.hpp
     Config.cpp
     Config.hpp

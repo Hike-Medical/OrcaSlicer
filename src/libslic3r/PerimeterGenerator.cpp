@@ -206,7 +206,8 @@ static ExtrusionEntityCollection traverse_loops(const PerimeterGenerator &perime
             // Reapply the nearest point search for starting point.
             // We allow polyline reversal because Clipper may have randomly reversed polylines during clipping.
             if(paths.empty()) continue;
-            chain_and_reorder_extrusion_paths(paths, &paths.front().first_point());
+            Point first_pt = paths.front().first_point();
+            chain_and_reorder_extrusion_paths(paths, &first_pt);
         } else {
             if (overhangs_reverse && perimeter_generator.layer_id > perimeter_generator.object_config->raft_layers) {
                 // Always reverse if detect overhang wall is not enabled
@@ -216,7 +217,7 @@ static ExtrusionEntityCollection traverse_loops(const PerimeterGenerator &perime
 
             ExtrusionPath path(role);
             //BBS.
-            path.polyline = polygon.split_at_first_point();
+            path.polyline = Polyline3(polygon.split_at_first_point());
             path.mm3_per_mm = extrusion_mm3_per_mm;
             path.width = extrusion_width;
             path.height     = (float)perimeter_generator.layer_height;
@@ -429,7 +430,7 @@ static ExtrusionEntityCollection traverse_extrusions(const PerimeterGenerator& p
                     Polylines be_clipped;
 
                     for (const ExtrusionPath &p : it.second) {
-                        be_clipped.emplace_back(std::move(p.polyline));
+                        be_clipped.emplace_back(p.polyline.to_polyline());
                     }
 
                     BoundingBox extrusion_bboxs = get_extents(be_clipped);
@@ -463,11 +464,11 @@ static ExtrusionEntityCollection traverse_extrusions(const PerimeterGenerator& p
                     };
                     std::unordered_map<Point, PointInfo, PointHash> point_occurrence;
                     for (const ExtrusionPath& path : paths) {
-                        ++point_occurrence[path.polyline.first_point()].occurrence;
-                        ++point_occurrence[path.polyline.last_point()].occurrence;
+                        ++point_occurrence[path.first_point()].occurrence;
+                        ++point_occurrence[path.last_point()].occurrence;
                         if (path.role() == erOverhangPerimeter) {
-                            point_occurrence[path.polyline.first_point()].is_overhang = true;
-                            point_occurrence[path.polyline.last_point()].is_overhang = true;
+                            point_occurrence[path.first_point()].is_overhang = true;
+                            point_occurrence[path.last_point()].is_overhang = true;
                         }
                     }
 
@@ -655,11 +656,11 @@ bool paths_touch(const ExtrusionPath &path_one, const ExtrusionPath &path_two, d
 {
     AABBTreeLines::LinesDistancer<Line> lines_two{path_two.as_polyline().lines()};
     for (size_t pt_idx = 0; pt_idx < path_one.polyline.size(); pt_idx++) {
-        if (lines_two.distance_from_lines<false>(path_one.polyline.points[pt_idx]) < limit_distance) { return true; }
+        if (lines_two.distance_from_lines<false>(path_one.polyline.points[pt_idx].to_point()) < limit_distance) { return true; }
     }
     AABBTreeLines::LinesDistancer<Line> lines_one{path_one.as_polyline().lines()};
     for (size_t pt_idx = 0; pt_idx < path_two.polyline.size(); pt_idx++) {
-        if (lines_one.distance_from_lines<false>(path_two.polyline.points[pt_idx]) < limit_distance) { return true; }
+        if (lines_one.distance_from_lines<false>(path_two.polyline.points[pt_idx].to_point()) < limit_distance) { return true; }
     }
     return false;
 }
@@ -1013,7 +1014,7 @@ std::tuple<std::vector<ExtrusionPaths>, Polygons> generate_extra_perimeters_over
                 // polyline)
                 bool first_overhang_is_closed_and_anchored =
                     (overhang_region.front().first_point() == overhang_region.front().last_point() &&
-                     !intersection_pl(overhang_region.front().polyline, optimized_lower_slices).empty());
+                     !intersection_pl(overhang_region.front().polyline.to_polyline(), optimized_lower_slices).empty());
                      
                 auto is_anchored = [&lower_layer_aabb_tree](const ExtrusionPath &path) {
                     return lower_layer_aabb_tree.distance_from_lines<true>(path.first_point()) <= 0 ||
@@ -1025,7 +1026,7 @@ std::tuple<std::vector<ExtrusionPaths>, Polygons> generate_extra_perimeters_over
                     size_t min_dist_idx = 0;
                     double min_dist = std::numeric_limits<double>::max();
                     for (size_t i = 0; i < overhang_region.front().polyline.size(); i++) {
-                        Point p = overhang_region.front().polyline[i];
+                        Point p = overhang_region.front().polyline[i].to_point();
                         if (double d = lower_layer_aabb_tree.distance_from_lines<true>(p) < min_dist) {
                             min_dist = d;
                             min_dist_idx = i;

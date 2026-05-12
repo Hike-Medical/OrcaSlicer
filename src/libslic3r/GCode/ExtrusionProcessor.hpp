@@ -360,7 +360,7 @@ public:
 
         // Orca: Pass to the point properties estimator the smallest ovehang distance that triggers a slowdown (smallest_distance_with_lower_speed)
         std::vector<ExtendedPoint> extended_points = estimate_points_properties<true, true, true, true>
-                                                                (path.polyline.points,
+                                                                (to_points(path.polyline.points),
                                                                  prev_layer_boundaries[current_object],
                                                                  path.width,
                                                                  -1,

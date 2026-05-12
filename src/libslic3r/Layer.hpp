@@ -1,6 +1,7 @@
 #ifndef slic3r_Layer_hpp_
 #define slic3r_Layer_hpp_
 
+#include "SLA/IndexedMesh.hpp"
 #include "libslic3r.h"
 #include "BoundingBox.hpp"
 #include "Flow.hpp"
@@ -150,6 +151,7 @@ public:
     // These lslices are also used to detect overhangs and overlaps between successive layers, therefore it is important
     // that the 1st lslice is not compensated by the Elephant foot compensation algorithm.
     ExPolygons 				 lslices;
+    ExPolygons               lslices_original;    // Pre-overhang-expansion slices for ZAA filtering
     ExPolygons 				 lslices_extrudable;  // BBS: the extrudable part of lslices used for tree support
     std::vector<BoundingBox> lslices_bboxes;
 
@@ -191,6 +193,7 @@ public:
                                                                            FillAdaptive::Octree *support_fill_octree,
                                                                            FillLightning::Generator* lightning_generator) const;
     void 					make_ironing();
+    void                    make_contour_z(const sla::IndexedMesh &mesh);
 
     void                    export_region_slices_to_svg(const char *path) const;
     void                    export_region_fill_surfaces_to_svg(const char *path) const;

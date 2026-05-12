@@ -1,5 +1,6 @@
 #include "Point.hpp"
 #include "Line.hpp"
+#include "Polyline.hpp"
 #include "MultiPoint.hpp"
 #include "Int128.hpp"
 #include "BoundingBox.hpp"
@@ -255,6 +256,18 @@ int cross(const Vec2crd &v1, const Vec2crd &v2)
     return Int128::sign_determinant_2x2_filtered(v1.x(), v1.y(), v2.x(), v2.y());
 }
 
+} // namespace int128
+
+Polyline to_polyline(const Points &points) { return Polyline(points); }
+Polyline3 to_polyline(const Points3 &points) { return Polyline3(points); }
+
+Points to_points(const Points3 &points3) {
+    Points points2;
+    points2.reserve(points3.size());
+    for (const Point3 &pt : points3) {
+        points2.push_back(pt.to_point());
+    }
+    return points2;
 }
 
-}
+} // namespace Slic3r

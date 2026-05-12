@@ -92,7 +92,7 @@ enum PrintStep {
 
 enum PrintObjectStep {
     posSlice, posPerimeters,posEstimateCurledExtrusions, posPrepareInfill,
-    posInfill, posIroning, posSupportMaterial, posSimplifyPath, posSimplifySupportPath,
+    posInfill, posIroning, posContouring, posSupportMaterial, posSimplifyPath, posSimplifySupportPath,
     // BBS
     posDetectOverhangsForLift,
     posSimplifyWall, posSimplifyInfill,
@@ -496,6 +496,7 @@ private:
     void prepare_infill();
     void infill();
     void ironing();
+    void contour_z();
     void generate_support_material();
     void estimate_curled_extrusions();
     void simplify_extrusion_path();
@@ -642,14 +643,14 @@ struct FakeWipeTower
         std::vector<ExtrusionPaths> paths;
         for (float h = 0.f; h < height; h += layer_height) {
             ExtrusionPath path(ExtrusionRole::erWipeTower, 0.0, 0.0, layer_height);
-            path.polyline = {minCorner, {maxCorner.x(), minCorner.y()}, maxCorner, {minCorner.x(), maxCorner.y()}, minCorner};
+            path.polyline = Polyline3(Polyline({minCorner, {maxCorner.x(), minCorner.y()}, maxCorner, {minCorner.x(), maxCorner.y()}, minCorner}));
             paths.push_back({path});
 
             if (h == 0.f) { // add brim
                 ExtrusionPath fakeBrim(ExtrusionRole::erBrim, 0.0, 0.0, layer_height);
                 Point         wtbminCorner = {minCorner - Point{bd, bd}};
                 Point         wtbmaxCorner = {maxCorner + Point{bd, bd}};
-                fakeBrim.polyline          = {wtbminCorner, {wtbmaxCorner.x(), wtbminCorner.y()}, wtbmaxCorner, {wtbminCorner.x(), wtbmaxCorner.y()}, wtbminCorner};
+                fakeBrim.polyline          = Polyline3(Polyline({wtbminCorner, {wtbmaxCorner.x(), wtbminCorner.y()}, wtbmaxCorner, {wtbminCorner.x(), wtbmaxCorner.y()}, wtbminCorner}));
                 paths.back().push_back(fakeBrim);
             }
         }
@@ -686,13 +687,13 @@ struct FakeWipeTower
 
 
             ExtrusionPath path(ExtrusionRole::erWipeTower, 0.0, 0.0, lh);
-            path.polyline = { minCorner, {maxCorner.x(), minCorner.y()}, maxCorner, {minCorner.x(), maxCorner.y()}, minCorner };
+            path.polyline = Polyline3(Polyline({ minCorner, {maxCorner.x(), minCorner.y()}, maxCorner, {minCorner.x(), maxCorner.y()}, minCorner }));
             paths.push_back({ path });
 
             // We added the border, now add several parallel lines so we can detect an object that is fully inside the tower.
             // For now, simply use fixed spacing of 3mm.
             for (coord_t y=minCorner.y()+scale_(3.); y<maxCorner.y(); y+=scale_(3.)) {
-                path.polyline = { {minCorner.x(), y}, {maxCorner.x(), y} };
+                path.polyline = Polyline3(Polyline({ {minCorner.x(), y}, {maxCorner.x(), y} }));
                 paths.back().emplace_back(path);
             }
 
@@ -701,15 +702,15 @@ struct FakeWipeTower
                 path.polyline.clear();
                 double r = cone_base_R * (1 - hh/height);
                 for (double alpha=0; alpha<2.01*M_PI; alpha+=2*M_PI/20.)
-                    path.polyline.points.emplace_back(Point::new_scale(width/2. + r * std::cos(alpha)/cone_scale_x, depth/2. + r * std::sin(alpha)));
+                    path.polyline.points.emplace_back(Point3(Point::new_scale(width/2. + r * std::cos(alpha)/cone_scale_x, depth/2. + r * std::sin(alpha)), 0));
                 paths.back().emplace_back(path);
                 if (hh == 0.f) { // Cone brim.
                     for (float bw=brim_width; bw>0.f; bw-=3.f) {
                         path.polyline.clear();
                         for (double alpha=0; alpha<2.01*M_PI; alpha+=2*M_PI/20.) // see load_wipe_tower_preview, where the same is a bit clearer
-                            path.polyline.points.emplace_back(Point::new_scale(
+                            path.polyline.points.emplace_back(Point3(Point::new_scale(
                                 width/2. + cone_base_R * std::cos(alpha)/cone_scale_x * (1. + cone_scale_x*bw/cone_base_R),
-                                depth/2. + cone_base_R * std::sin(alpha) * (1. + bw/cone_base_R))
+                                depth/2. + cone_base_R * std::sin(alpha) * (1. + bw/cone_base_R)), 0)
                             );
                         paths.back().emplace_back(path);
                     }

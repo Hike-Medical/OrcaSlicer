@@ -1087,7 +1087,15 @@ std::vector<int> ToolOrdering::get_recommended_filament_maps(const std::vector<s
         return std::vector<int>();
 
     const auto& print_config = print->config();
-    const unsigned int filament_nums = (unsigned int)(print_config.filament_colour.values.size() + EPSILON);
+    // Derive filament count from layer_filaments (actual used filament IDs) to
+    // handle cases where filament_colour is not set in the filament profile and
+    // therefore defaults to a single entry, causing SEMM T-slot assignment to fail.
+    unsigned int max_filament_id = 0;
+    for (const auto& lf : layer_filaments)
+        for (auto f : lf)
+            if (f + 1 > max_filament_id) max_filament_id = f + 1;
+    const unsigned int filament_nums = std::max(max_filament_id,
+        (unsigned int)(print_config.filament_colour.values.size() + EPSILON));
 
     // get flush matrix
     std::vector<FlushMatrix> nozzle_flush_mtx;
@@ -1126,6 +1134,13 @@ std::vector<int> ToolOrdering::get_recommended_filament_maps(const std::vector<s
     int master_extruder_id = print_config.master_extruder_id.value -1; // switch to 0 based idx
     std::vector<int>ret(filament_nums, master_extruder_id);
     bool ignore_ext_filament = false; // TODO: read from config
+    // For single-nozzle SEMM (e.g. P1S with AMS): all filaments stay on
+    // extruder 0 (the single physical nozzle). Tool changes (M1020) are
+    // triggered by filament_id changes, not extruder_id changes.
+    // ret is already initialized to master_extruder_id (0) for all entries.
+    if (extruder_nums == 1 && filament_nums > 1 && print->is_BBL_printer()) {
+        return ret;
+    }
     // if mutli_extruder, calc group,otherwise set to 0
     if (extruder_nums == 2 && print->is_BBL_printer()) {
         std::vector<std::string> extruder_ams_count_str = print_config.extruder_ams_count.values;
@@ -1218,7 +1233,13 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     if (!print_config || m_layer_tools.empty())
         return;
 
-    const unsigned int number_of_extruders = (unsigned int)(print_config->filament_colour.values.size() + EPSILON);
+    // Use the larger of filament_colour and filament_diameter sizes as the
+    // actual filament count.  filament_colour may not be set in filament profiles
+    // (e.g. same physical material at different temperatures) and default to 1,
+    // while filament_diameter is always set per-filament.
+    const unsigned int number_of_extruders = (unsigned int)std::max(
+        print_config->filament_colour.values.size(),
+        print_config->filament_diameter.values.size());
 
     using FlushMatrix = std::vector<std::vector<float>>;
     size_t             nozzle_nums = print_config->nozzle_diameter.values.size();
@@ -1279,7 +1300,9 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
 
-        if (m_print->is_BBL_printer())
+        // Skip nozzle printability check for SEMM printers (single nozzle with AMS,
+        // e.g. P1S): T-commands represent AMS slot changes, not physical nozzle changes.
+        if (m_print->is_BBL_printer() && print_config->nozzle_diameter.values.size() >= 2)
         check_filament_printable_after_group(used_filaments, filament_maps, print_config);
     }
     else {

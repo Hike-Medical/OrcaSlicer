@@ -7,6 +7,7 @@
 #include "I18N.hpp"
 #include "Layer.hpp"
 #include "MutablePolygon.hpp"
+#include "SLA/IndexedMesh.hpp"
 #include "PrintConfig.hpp"
 #include "Support/SupportMaterial.hpp"
 #include "Support/SupportSpotsGenerator.hpp"
@@ -23,6 +24,7 @@
 #include "AABBTreeLines.hpp"
 
 #include <float.h>
+#include <mutex>
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/concurrent_vector.h>
 #include <oneapi/tbb/parallel_for.h>
@@ -709,6 +711,179 @@ void PrintObject::ironing()
     }
 }
 
+void PrintObject::contour_z()
+{
+    if (!this->set_started(posContouring))
+        return;
+
+    if (!this->config().zaa_enabled) {
+        this->set_done(posContouring);
+        return;
+    }
+
+    m_print->set_status(40, L("Z contouring"));
+    BOOST_LOG_TRIVIAL(debug) << "Contouring in parallel - start";
+
+    TriangleMesh mesh = this->model_object()->raw_mesh();
+    if (model_object()->instances.size() != 1)
+        throw Slic3r::RuntimeError("ContourZ: unexpected number of instances");
+
+    // Clear contour debug file
+    { FILE *cf = fopen("/tmp/zaa_contour_debug.txt", "w"); if (cf) fclose(cf); }
+
+    // Match BambuStudio-ZAA: apply instance rotation/scale but NO translation.
+    // BambuStudio uses transform_mesh(true) which calls get_matrix(dont_translate=true).
+    // The mesh stays at its raw_mesh() coordinates (not centered, not on-bed).
+    // This gives ground_level = mesh.min.z() which is typically a large negative value.
+    // mesh_z = print_z + ground_level puts the raycast origin well below the mesh surface,
+    // making d negative for perimeter walls on slopes → walls follow the surface contour.
+    //
+    // We cannot use trafo_centered() because it includes XY centering AND places the mesh
+    // on the bed (Z=0), making ground_level ≈ 0 → d ≈ 0 → walls not contoured.
+    //
+    // For XY alignment with extrusion paths (which use center_offset), we apply the
+    // center_offset shift separately AFTER the rotation, matching what the slicing pipeline does.
+    model_object()->instances.front()->transform_mesh(&mesh, true);
+    Vec3d center_shift(- unscale<double>(m_center_offset.x()),
+                       - unscale<double>(m_center_offset.y()), 0.0);
+    mesh.translate(center_shift.x(), center_shift.y(), center_shift.z());
+
+    sla::IndexedMesh imesh(mesh);
+
+    // Debug: write alignment info to a file so we can inspect it
+    {
+        BoundingBoxf3 mbb = mesh.bounding_box();
+        FILE *f = fopen("/tmp/zaa_debug.txt", "w");
+        if (f) {
+            fprintf(f, "mesh_bb_min=%.4f,%.4f,%.4f\n", mbb.min.x(), mbb.min.y(), mbb.min.z());
+            fprintf(f, "mesh_bb_max=%.4f,%.4f,%.4f\n", mbb.max.x(), mbb.max.y(), mbb.max.z());
+            fprintf(f, "center_offset=%.4f,%.4f\n", unscale<double>(m_center_offset.x()), unscale<double>(m_center_offset.y()));
+            fprintf(f, "ground_level=%.4f\n", imesh.ground_level());
+            // Dump m_trafo matrix for debugging
+            fprintf(f, "trafo=%.4f,%.4f,%.4f,%.4f;%.4f,%.4f,%.4f,%.4f;%.4f,%.4f,%.4f,%.4f\n",
+                m_trafo(0,0), m_trafo(0,1), m_trafo(0,2), m_trafo(0,3),
+                m_trafo(1,0), m_trafo(1,1), m_trafo(1,2), m_trafo(1,3),
+                m_trafo(2,0), m_trafo(2,1), m_trafo(2,2), m_trafo(2,3));
+            fprintf(f, "layers=%zu\n", m_layers.size());
+
+            // Find first perimeter point on layer 2 (search recursively)
+            if (m_layers.size() > 2) {
+                Layer *l2 = m_layers[2];
+                fprintf(f, "layer2_print_z=%.4f\n", l2->print_z);
+                bool found = false;
+                for (LayerRegion *r : l2->regions()) {
+                    for (ExtrusionEntity *e : r->perimeters.entities) {
+                        // Try direct ExtrusionLoop
+                        ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
+                        if (loop && !loop->paths.empty()) {
+                            auto &pts = loop->paths.front().polyline.points;
+                            if (!pts.empty()) {
+                                double px = unscale_(pts.front().x()), py = unscale_(pts.front().y());
+                                fprintf(f, "layer2_first_perim=%.4f,%.4f\n", px, py);
+                                // Raycast from this point
+                                coordf_t mz = l2->print_z + imesh.ground_level();
+                                auto h_up = imesh.query_ray_hit({px, py, mz}, {0.0, 0.0, 1.0});
+                                auto h_dn = imesh.query_ray_hit({px, py, mz}, {0.0, 0.0, -1.0});
+                                fprintf(f, "layer2_perim_raycast: up=%.4f down=%.4f d=%.4f\n",
+                                    h_up.distance(), h_dn.distance(),
+                                    h_up.distance() < h_dn.distance() ? h_up.distance() : -h_dn.distance());
+                                found = true;
+                                break;
+                            }
+                        }
+                        // Try ExtrusionEntityCollection wrapping loops
+                        ExtrusionEntityCollection *coll = dynamic_cast<ExtrusionEntityCollection*>(e);
+                        if (coll) {
+                            for (ExtrusionEntity *inner : coll->entities) {
+                                ExtrusionLoop *iloop = dynamic_cast<ExtrusionLoop*>(inner);
+                                if (iloop && !iloop->paths.empty()) {
+                                    auto &pts = iloop->paths.front().polyline.points;
+                                    if (!pts.empty()) {
+                                        double px = unscale_(pts.front().x()), py = unscale_(pts.front().y());
+                                        fprintf(f, "layer2_first_perim=%.4f,%.4f (in collection)\n", px, py);
+                                        coordf_t mz = l2->print_z + imesh.ground_level();
+                                        auto h_up = imesh.query_ray_hit({px, py, mz}, {0.0, 0.0, 1.0});
+                                        auto h_dn = imesh.query_ray_hit({px, py, mz}, {0.0, 0.0, -1.0});
+                                        fprintf(f, "layer2_perim_raycast: up=%.4f down=%.4f d=%.4f\n",
+                                            h_up.distance(), h_dn.distance(),
+                                            h_up.distance() < h_dn.distance() ? h_up.distance() : -h_dn.distance());
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (found) break;
+                    }
+                    if (found) break;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    std::mutex mtx;
+    size_t completed = 0;
+    tbb::parallel_for(
+        // Start from layer 1 to avoid build plate collision
+        tbb::blocked_range<size_t>(1, m_layers.size()),
+        [&, this](const tbb::blocked_range<size_t>& range) {
+            for (size_t layer_idx = range.begin(); layer_idx < range.end(); layer_idx++) {
+                m_print->throw_if_canceled();
+                m_layers[layer_idx]->make_contour_z(imesh);
+
+                std::scoped_lock lock(mtx);
+                completed++;
+                std::string msg = (boost::format("Z contoured layer %d/%d (%d%%)") % completed % m_layers.size() % int(double(completed) / m_layers.size() * 100)).str();
+                m_print->set_status(40, msg);
+            }
+        }
+    );
+    m_print->throw_if_canceled();
+    BOOST_LOG_TRIVIAL(debug) << "Contouring in parallel - end";
+
+    // Debug: count z_contoured paths
+    {
+        int total_contoured = 0, total_perim_contoured = 0, total_paths = 0;
+        for (Layer *layer : m_layers) {
+            for (LayerRegion *r : layer->regions()) {
+                for (ExtrusionEntity *e : r->perimeters.entities) {
+                    auto count_paths = [&](ExtrusionEntity *ent) {
+                        // Lambda to recursively count
+                    };
+                    ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop*>(e);
+                    if (loop) {
+                        for (auto &p : loop->paths) {
+                            total_paths++;
+                            if (p.z_contoured) { total_contoured++; total_perim_contoured++; }
+                        }
+                    }
+                    ExtrusionEntityCollection *coll = dynamic_cast<ExtrusionEntityCollection*>(e);
+                    if (coll) {
+                        for (ExtrusionEntity *inner : coll->entities) {
+                            ExtrusionLoop *il = dynamic_cast<ExtrusionLoop*>(inner);
+                            if (il) {
+                                for (auto &p : il->paths) {
+                                    total_paths++;
+                                    if (p.z_contoured) { total_contoured++; total_perim_contoured++; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        FILE *df = fopen("/tmp/zaa_debug.txt", "a");
+        if (df) {
+            fprintf(df, "z_contoured_stats: total_paths=%d contoured=%d perim_contoured=%d\n",
+                total_paths, total_contoured, total_perim_contoured);
+            fclose(df);
+        }
+    }
+
+    this->set_done(posContouring);
+}
+
 // BBS
 void PrintObject::clear_overhangs_for_lift()
 {
@@ -1351,15 +1526,15 @@ bool PrintObject::invalidate_step(PrintObjectStep step)
 
     // propagate to dependent steps
     if (step == posPerimeters) {
-		invalidated |= this->invalidate_steps({ posPrepareInfill, posInfill, posIroning, posSimplifyPath, posSimplifyInfill });
+		invalidated |= this->invalidate_steps({ posPrepareInfill, posInfill, posIroning, posContouring, posSimplifyPath, posSimplifyInfill });
         invalidated |= m_print->invalidate_steps({ psSkirtBrim });
     } else if (step == posPrepareInfill) {
-        invalidated |= this->invalidate_steps({ posInfill, posIroning, posSimplifyPath, posSimplifyInfill });
+        invalidated |= this->invalidate_steps({ posInfill, posIroning, posContouring, posSimplifyPath, posSimplifyInfill });
     } else if (step == posInfill) {
-        invalidated |= this->invalidate_steps({ posIroning, posSimplifyInfill });
+        invalidated |= this->invalidate_steps({ posIroning, posContouring, posSimplifyInfill });
         invalidated |= m_print->invalidate_steps({ psSkirtBrim });
     } else if (step == posSlice) {
-		invalidated |= this->invalidate_steps({ posPerimeters, posPrepareInfill, posInfill, posIroning, posSupportMaterial, posSimplifyPath, posSimplifyInfill });
+		invalidated |= this->invalidate_steps({ posPerimeters, posPrepareInfill, posInfill, posIroning, posContouring, posSupportMaterial, posSimplifyPath, posSimplifyInfill });
         invalidated |= m_print->invalidate_steps({ psSkirtBrim });
         m_slicing_params.valid = false;
     } else if (step == posSupportMaterial) {
