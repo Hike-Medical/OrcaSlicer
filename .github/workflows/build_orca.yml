@@ -60,12 +60,11 @@ jobs:
         if: inputs.os == 'ubuntu-24.04'
         uses: ./.github/actions/apt-install-deps
 
-      - name: Build slicer and tests
+      - name: Build slicer CLI
         if: inputs.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          ./build_linux.sh -str
-          tar -cvpf build_tests.tar build/tests
+          ./build_linux.sh -sr
 
       - name: Collect CLI binary and shared libs
         if: inputs.os == 'ubuntu-24.04'
@@ -84,16 +83,6 @@ jobs:
             xargs -I{} cp -n {} artifact/ 2>/dev/null || true
           cp -r resources artifact/resources || true
           ls -lh artifact/
-
-      - name: Upload Test Artifact
-        if: inputs.os == 'ubuntu-24.04'
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ github.sha }}-tests
-          overwrite: true
-          path: build_tests.tar
-          retention-days: 5
-          if-no-files-found: error
 
       - name: Upload SoleSlicer CLI
         if: inputs.os == 'ubuntu-24.04'
