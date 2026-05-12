@@ -1,0 +1,88 @@
+name: Publish SoleSlicer Release
+
+on:
+  workflow_run:
+    workflows: ["Build all"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  publish-linux:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ARTIFACT_BUCKET: ${{ secrets.SOLESLICER_ARTIFACT_BUCKET }}
+    steps:
+      - name: Checkout (for version)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve version and SHA
+        id: meta
+        run: |
+          VER=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Download Linux AppImage artifact
+        uses: actions/download-artifact@v7
+        with:
+          pattern: OrcaSlicer_Linux_ubuntu_2404_*
+          path: artifact
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package tarball
+        id: package
+        run: |
+          APPIMAGE=$(find artifact -type f -name "*.AppImage" | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "ERROR: No AppImage found in artifact"
+            find artifact -type f
+            exit 1
+          fi
+          echo "Found AppImage: $APPIMAGE"
+
+          TARBALL="soleslicer-linux-amd64.tar.gz"
+          tar -czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"
+          SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
+
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Tarball: $TARBALL (sha256: $SHA256)"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload to S3
+        env:
+          SHA: ${{ steps.meta.outputs.sha }}
+          VER: ${{ steps.meta.outputs.version }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          S3_BASE="s3://${ARTIFACT_BUCKET}/soleslicer"
+
+          for PREFIX in "${SHA}" "latest"; do
+            aws s3 cp "$TARBALL" "${S3_BASE}/${PREFIX}/soleslicer-linux-amd64.tar.gz" \
+              --metadata "sha256=${SHA256},version=${VER},commit=${SHA}"
+          done
+
+          echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
+          for PREFIX in "${SHA}" "latest"; do
+            aws s3 cp sha256.txt "${S3_BASE}/${PREFIX}/sha256.txt"
+          done
+
+          echo "Published SoleSlicer v${VER} (${SHA})"
+          echo "  s3://${ARTIFACT_BUCKET}/soleslicer/${SHA}/soleslicer-linux-amd64.tar.gz"
+          echo "  s3://${ARTIFACT_BUCKET}/soleslicer/latest/soleslicer-linux-amd64.tar.gz"
+          echo "  SHA256: ${SHA256}"
