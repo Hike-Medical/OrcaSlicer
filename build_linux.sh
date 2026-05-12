@@ -212,7 +212,7 @@ if [[ -n "${BUILD_DEPS}" ]] ; then
     fi
 
     print_and_run cmake -S deps -B deps/$BUILD_DIR "${CMAKE_C_CXX_COMPILER_CLANG[@]}" "${CMAKE_LLD_LINKER_ARGS[@]}" -G Ninja "${COLORED_OUTPUT}" "${BUILD_ARGS[@]}"
-    print_and_run cmake --build deps/$BUILD_DIR
+    print_and_run cmake --build deps/$BUILD_DIR --parallel
 fi
 
 if [[ -n "${BUILD_ORCA}" ]] || [[ -n "${BUILD_TESTS}" ]] ; then
@@ -239,14 +239,14 @@ if [[ -n "${BUILD_ORCA}" ]] || [[ -n "${BUILD_TESTS}" ]] ; then
     echo "done"
     if [[ -n "${BUILD_ORCA}" ]]; then
 	echo "Building OrcaSlicer ..."
-	print_and_run cmake --build $BUILD_DIR --config "${BUILD_CONFIG}" --target OrcaSlicer
+	print_and_run cmake --build $BUILD_DIR --config "${BUILD_CONFIG}" --target OrcaSlicer --parallel
 	echo "Building OrcaSlicer_profile_validator .."
-	print_and_run cmake --build $BUILD_DIR --config "${BUILD_CONFIG}" --target OrcaSlicer_profile_validator
+	print_and_run cmake --build $BUILD_DIR --config "${BUILD_CONFIG}" --target OrcaSlicer_profile_validator --parallel
 	./scripts/run_gettext.sh
     fi
     if [[ -n "${BUILD_TESTS}" ]] ; then
 	echo "Building tests ..."
-	print_and_run cmake --build ${BUILD_DIR} --config "${BUILD_CONFIG}" --target tests/all
+	print_and_run cmake --build ${BUILD_DIR} --config "${BUILD_CONFIG}" --target tests/all --parallel
     fi
     echo "done"
 fi
