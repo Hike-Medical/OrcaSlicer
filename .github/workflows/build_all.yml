@@ -3,8 +3,7 @@ name: Build all
 on:
   push:
     branches:
-     - main
-     - release/*
+      - main
     paths:
      - 'deps/**'
      - 'src/**'
@@ -13,12 +12,9 @@ on:
      - 'localization/**'
      - 'resources/**'
      - ".github/workflows/build_*.yml"
-     - 'scripts/flatpak/**'
+     - 'build_linux.sh'
 
   pull_request:
-    branches:
-     - main
-     - release/*
     paths:
      - 'deps/**'
      - 'deps_src/**'
@@ -27,15 +23,8 @@ on:
      - 'version.inc'
      - ".github/workflows/build_*.yml"
      - 'build_linux.sh'
-     - 'build_release_vs2022.bat'
-     - 'build_release_macos.sh'
-     - 'scripts/flatpak/**'
 
-
-  schedule:
-      - cron: '0 17 * * *' # run once a day at 1 AM Singapore time (UTC+8)
-
-  workflow_dispatch: # allows for manual dispatch
+  workflow_dispatch:
     inputs:
       build-deps-only:
         description: 'Only build dependencies (bypasses caching)'
@@ -45,140 +34,94 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-  
 
 jobs:
   build_linux:
     strategy:
       fail-fast: false
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ubuntu-24.04
       build-deps-only: ${{ inputs.build-deps-only || false }}
     secrets: inherit
-  build_all:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-          - os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}
-            arch: arm64
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
-    uses: ./.github/workflows/build_check_cache.yml
-    with:
-      os: ${{ matrix.os }}
-      arch: ${{ matrix.arch }}
-      build-deps-only: ${{ inputs.build-deps-only || false }}
-      force-build: ${{ github.event_name == 'schedule' }}
-    secrets: inherit
-  unit_tests:
-    name: Unit Tests
-    runs-on: ubuntu-24.04
+
+  upload-to-s3:
+    name: Upload to S3
     needs: build_linux
-    if: ${{ !cancelled() && success() }}
+    runs-on: ubuntu-latest
+    env:
+      ARTIFACT_BUCKET: ai-staging-packages
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            .github
-            scripts
-            tests
-      - name: Apt-Install Dependencies
-        uses: ./.github/actions/apt-install-deps
-      - name: Restore Test Artifact
+
+      - name: Resolve S3 folder
+        id: meta
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FOLDER="${{ github.head_ref }}"
+          else
+            FOLDER="${{ github.ref_name }}"
+          fi
+          FOLDER=$(echo "$FOLDER" | tr '[:upper:]/' '[:lower:]-')
+          echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
+          echo "S3 folder: $FOLDER"
+
+      - name: Download SoleSlicer CLI artifact
         uses: actions/download-artifact@v7
         with:
-          name: ${{ github.sha }}-tests
-      - uses: lukka/get-cmake@latest
-        with:
-          cmakeVersion: "~3.28.0"  # use most recent 3.28.x version
-      - name: Unpackage and Run Unit Tests
-        timeout-minutes: 20
+          pattern: soleslicer-*-linux-amd64
+          path: artifact
+          merge-multiple: true
+
+      - name: Verify artifact contents
         run: |
-          tar -xvf build_tests.tar
-          scripts/run_unit_tests.sh
-      - name: Upload Test Logs
-        uses: actions/upload-artifact@v6
-        if: ${{ failure() }}
+          if [ ! -f artifact/orca-slicer ]; then
+            echo "::error::orca-slicer binary not found in downloaded artifact"
+            find artifact -type f | head -20
+            exit 1
+          fi
+          file artifact/orca-slicer
+          echo "Binary size: $(du -h artifact/orca-slicer | cut -f1)"
+
+      - name: Package tarball
+        id: package
+        run: |
+          TARBALL="soleslicer-linux-amd64.tar.gz"
+          tar -czf "$TARBALL" -C artifact .
+          SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Tarball: $TARBALL ($(du -h "$TARBALL" | cut -f1), sha256: $SHA256)"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          name: unit-test-logs
-          path: build/tests/**/*.log
-      - name: Publish Test Results
-        if: always()
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          files: "ctest_results.xml"
-  flatpak:
-    name: "Flatpak"
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
-      options: --privileged
-      volumes:
-        - /usr/local/lib/android:/usr/local/lib/android
-        - /usr/share/dotnet:/usr/share/dotnet
-        - /opt/ghc:/opt/ghc1
-        - /usr/local/share/boost:/usr/local/share/boost1
-        - /opt/hostedtoolcache:/opt/hostedtoolcache1
-    strategy:
-      fail-fast: false
-      matrix:
-        variant:
-          - arch: x86_64
-            runner: ubuntu-24.04
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
-    runs-on: ${{ matrix.variant.runner }}
-    env:
-      date:
-      ver:
-      ver_pure:
-    steps:
-    - name: "Remove unneeded stuff to free disk space"
-      run:
-        rm -rf /usr/local/lib/android/* /usr/share/dotnet/* /opt/ghc1/* "/usr/local/share/boost1/*" /opt/hostedtoolcache1/*
-    - uses: actions/checkout@v6
-    - name: Get the version and date
-      run: |
-        ver_pure=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-          ver="PR-${{ github.event.number }}"
-          git_commit_hash="${{ github.event.pull_request.head.sha }}"
-        else
-          ver=V$ver_pure
-          git_commit_hash=""
-        fi
-        echo "ver=$ver" >> $GITHUB_ENV
-        echo "ver_pure=$ver_pure" >> $GITHUB_ENV
-        echo "date=$(date +'%Y%m%d')" >> $GITHUB_ENV
-        echo "git_commit_hash=$git_commit_hash" >> $GITHUB_ENV
-      shell: bash
-    - uses: flatpak/flatpak-github-actions/flatpak-builder@master
-      with:
-        bundle: OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak
-        manifest-path: scripts/flatpak/io.github.softfever.OrcaSlicer.yml
-        cache: true
-        cache-key: flatpak-builder-${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
-        arch: ${{ matrix.variant.arch }}
-        upload-artifact: false
-    - name: Upload artifacts Flatpak
-      uses: actions/upload-artifact@v6
-      with:
-        name: OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak
-        path: '/__w/OrcaSlicer/OrcaSlicer/OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak'
-    - name: Deploy Flatpak to nightly release
-      if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main'
-      uses: WebFreak001/deploy-nightly@v3.2.0
-      with:
-        upload_url: https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}
-        release_id: 137995723
-        asset_path: /__w/OrcaSlicer/OrcaSlicer/OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak
-        asset_name: OrcaSlicer-Linux-flatpak_nightly_${{ matrix.variant.arch }}.flatpak
-        asset_content_type: application/octet-stream
-        max_releases: 1 # optional, if there are more releases than this matching the asset_name, the oldest ones are going to be deleted
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload to S3
+        env:
+          FOLDER: ${{ steps.meta.outputs.folder }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/soleslicer-linux-amd64.tar.gz"
+          echo "Uploading to ${S3_PATH} ..."
+          aws s3 cp "$TARBALL" "$S3_PATH" \
+            --metadata "sha256=${SHA256}"
+
+          echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
+          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/sha256.txt"
+
+          echo ""
+          echo "=== Uploaded ==="
+          echo "  ${S3_PATH}"
+          echo "  SHA256: ${SHA256}"
+
+      - name: Verify S3 upload
+        env:
+          FOLDER: ${{ steps.meta.outputs.folder }}
+        run: |
+          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/"

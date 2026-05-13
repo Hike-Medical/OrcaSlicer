@@ -1,0 +1,80 @@
+name: Publish SoleSlicer Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Release tag / version to publish (e.g. v0.0.1)'
+        required: true
+        type: string
+
+jobs:
+  publish-linux:
+    name: Promote staging to production
+    runs-on: ubuntu-latest
+    env:
+      STAGING_BUCKET: ai-staging-packages
+      PRODUCTION_BUCKET: ai-production-packages
+    steps:
+      - name: Checkout (for version)
+        uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.release-tag }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No release tag provided. Use a GitHub release or pass release-tag input."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS access
+        run: aws sts get-caller-identity
+
+      - name: Verify staging artifact exists
+        run: |
+          STAGING_PATH="s3://${STAGING_BUCKET}/soleslicer/main/soleslicer-linux-amd64.tar.gz"
+          echo "Checking ${STAGING_PATH} ..."
+          if ! aws s3 ls "$STAGING_PATH"; then
+            echo "::error::Staging artifact not found at ${STAGING_PATH}"
+            echo "Make sure the Build all workflow has run successfully on main first."
+            exit 1
+          fi
+
+      - name: Copy from staging to production
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          STAGING_BASE="s3://${STAGING_BUCKET}/soleslicer/main"
+          PROD_BASE="s3://${PRODUCTION_BUCKET}/soleslicer/${TAG}"
+
+          echo "Promoting staging → production"
+          echo "  from: ${STAGING_BASE}/"
+          echo "  to:   ${PROD_BASE}/"
+
+          aws s3 cp "${STAGING_BASE}/soleslicer-linux-amd64.tar.gz" \
+                    "${PROD_BASE}/soleslicer-linux-amd64.tar.gz"
+
+          aws s3 cp "${STAGING_BASE}/sha256.txt" \
+                    "${PROD_BASE}/sha256.txt"
+
+          echo ""
+          echo "=== Published SoleSlicer ${TAG} ==="
+          echo "  ${PROD_BASE}/soleslicer-linux-amd64.tar.gz"
+
+      - name: Verify production upload
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          aws s3 ls "s3://${PRODUCTION_BUCKET}/soleslicer/${TAG}/"

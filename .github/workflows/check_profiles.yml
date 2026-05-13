@@ -1,12 +1,5 @@
 name: Check profiles
 on:
-  pull_request:
-    branches:
-    - main
-    paths:
-    - 'resources/profiles/**'
-    - ".github/workflows/check_profiles.yml"
-
   workflow_dispatch:
     inputs:
       logLevel:

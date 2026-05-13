@@ -1,12 +1,7 @@
 name: Check locale
 
-on: 
-    pull_request:
-      branches: 
-       - main 
-      paths:
-       - 'localization/**'
-       - ".github/workflows/check_locale.yml"
+on:
+  workflow_dispatch:
 
 jobs:
   check_translation:
