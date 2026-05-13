@@ -48,7 +48,6 @@ jobs:
   upload-to-s3:
     name: Upload to S3
     needs: build_linux
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
