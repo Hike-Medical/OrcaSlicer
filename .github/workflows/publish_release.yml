@@ -4,148 +4,33 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Release tag / version to publish (e.g. v0.0.1)'
+        required: true
+        type: string
 
 jobs:
-  build:
-    name: Build SoleSlicer
-    runs-on: ubuntu-24.04
-    env:
-      ver:
-      ver_pure:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          lfs: 'true'
-
-      - name: Restore deps cache
-        id: cache_deps
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/deps/build/OrcaSlicer_dep
-          key: ubuntu-24.04-cache-orcaslicer_deps-build-${{ hashFiles('deps/**') }}
-
-      - name: Restore ccache
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-ubuntu-24.04-${{ github.ref_name }}-${{ github.sha }}
-          restore-keys: |
-            ccache-ubuntu-24.04-${{ github.ref_name }}-
-            ccache-ubuntu-24.04-main-
-            ccache-ubuntu-24.04-
-
-      - uses: lukka/get-cmake@latest
-        with:
-          cmakeVersion: "~3.28.0"
-
-      - name: Apt-Install Dependencies
-        uses: ./.github/actions/apt-install-deps
-
-      - name: Install ccache
-        run: |
-          sudo apt-get install -y ccache
-          ccache --zero-stats
-          ccache --max-size=1G
-
-      - name: Build deps (if not cached)
-        if: steps.cache_deps.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          ./build_linux.sh -dr -j "$(nproc)"
-
-      - name: Resolve version label
-        run: |
-          ver_pure=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            branch="${{ github.ref_name }}"
-          else
-            branch="${{ github.ref_name }}"
-          fi
-          ver=$(echo "$branch" | tr '[:upper:]/' '[:lower:]-')
-          echo "ver=$ver" >> $GITHUB_ENV
-          echo "ver_pure=$ver_pure" >> $GITHUB_ENV
-        shell: bash
-
-      - name: Build slicer CLI
-        shell: bash
-        env:
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: |
-          ./build_linux.sh -sr -j "$(nproc)"
-
-      - name: Print ccache stats
-        run: ccache --show-stats
-
-      - name: Collect CLI binary and shared libs
-        run: |
-          mkdir -p artifact
-          BINARY=$(find build/ -name "orca-slicer" -type f -exec file {} \; | grep ELF | head -1 | cut -d: -f1)
-          if [ -z "$BINARY" ]; then
-            echo "ERROR: orca-slicer ELF binary not found"
-            find build/src/ -type f -executable 2>/dev/null | head -20
-            exit 1
-          fi
-          echo "Found binary: $BINARY ($(du -h "$BINARY" | cut -f1))"
-          cp "$BINARY" artifact/orca-slicer
-          chmod +x artifact/orca-slicer
-          ldd "$BINARY" | grep "=> /" | awk '{print $3}' | \
-            xargs -I{} cp -n {} artifact/ 2>/dev/null || true
-          cp -r resources artifact/resources || true
-          ls -lh artifact/
-
-      - name: Upload SoleSlicer CLI
-        uses: actions/upload-artifact@v6
-        with:
-          name: soleslicer-${{ env.ver }}-linux-amd64
-          path: artifact/
-
   publish-linux:
-    needs: build
+    name: Promote staging to production
     runs-on: ubuntu-latest
     env:
-      ARTIFACT_BUCKET: ai-production-packages
+      STAGING_BUCKET: ai-staging-packages
+      PRODUCTION_BUCKET: ai-production-packages
     steps:
       - name: Checkout (for version)
         uses: actions/checkout@v6
 
-      - name: Resolve version
+      - name: Resolve release tag
         id: meta
         run: |
-          VER=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "Resolved: version=$VER"
-
-      - name: Download SoleSlicer CLI artifact
-        uses: actions/download-artifact@v7
-        with:
-          pattern: soleslicer-*-linux-amd64
-          path: artifact
-          merge-multiple: true
-
-      - name: Verify artifact contents
-        run: |
-          echo "=== Artifact contents ==="
-          find artifact -type f | head -30
-          if [ ! -f artifact/orca-slicer ]; then
-            echo "::error::orca-slicer binary not found in downloaded artifact"
+          TAG="${{ github.event.release.tag_name || inputs.release-tag }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No release tag provided. Use a GitHub release or pass release-tag input."
             exit 1
           fi
-          file artifact/orca-slicer
-          echo "Binary size: $(du -h artifact/orca-slicer | cut -f1)"
-
-      - name: Package tarball
-        id: package
-        run: |
-          TARBALL="soleslicer-linux-amd64.tar.gz"
-          tar -czf "$TARBALL" -C artifact .
-          SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
-
-          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "Tarball: $TARBALL ($(du -h "$TARBALL" | cut -f1), sha256: $SHA256)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -157,27 +42,39 @@ jobs:
       - name: Verify AWS access
         run: aws sts get-caller-identity
 
-      - name: Upload to S3
-        env:
-          VER: ${{ steps.meta.outputs.version }}
-          TARBALL: ${{ steps.package.outputs.tarball }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
+      - name: Verify staging artifact exists
         run: |
-          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/soleslicer-linux-amd64.tar.gz"
-          echo "Uploading to ${S3_PATH} ..."
-          aws s3 cp "$TARBALL" "$S3_PATH" \
-            --metadata "sha256=${SHA256},version=${VER}"
+          STAGING_PATH="s3://${STAGING_BUCKET}/soleslicer/main/soleslicer-linux-amd64.tar.gz"
+          echo "Checking ${STAGING_PATH} ..."
+          if ! aws s3 ls "$STAGING_PATH"; then
+            echo "::error::Staging artifact not found at ${STAGING_PATH}"
+            echo "Make sure the Build all workflow has run successfully on main first."
+            exit 1
+          fi
 
-          echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
-          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/sha256.txt"
+      - name: Copy from staging to production
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          STAGING_BASE="s3://${STAGING_BUCKET}/soleslicer/main"
+          PROD_BASE="s3://${PRODUCTION_BUCKET}/soleslicer/${TAG}"
+
+          echo "Promoting staging → production"
+          echo "  from: ${STAGING_BASE}/"
+          echo "  to:   ${PROD_BASE}/"
+
+          aws s3 cp "${STAGING_BASE}/soleslicer-linux-amd64.tar.gz" \
+                    "${PROD_BASE}/soleslicer-linux-amd64.tar.gz"
+
+          aws s3 cp "${STAGING_BASE}/sha256.txt" \
+                    "${PROD_BASE}/sha256.txt"
 
           echo ""
-          echo "=== Published SoleSlicer v${VER} ==="
-          echo "  ${S3_PATH}"
-          echo "  SHA256: ${SHA256}"
+          echo "=== Published SoleSlicer ${TAG} ==="
+          echo "  ${PROD_BASE}/soleslicer-linux-amd64.tar.gz"
 
-      - name: Verify S3 upload
+      - name: Verify production upload
         env:
-          VER: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/"
+          aws s3 ls "s3://${PRODUCTION_BUCKET}/soleslicer/${TAG}/"

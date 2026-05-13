@@ -52,15 +52,20 @@ jobs:
     env:
       ARTIFACT_BUCKET: ai-staging-packages
     steps:
-      - name: Checkout (for version)
+      - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Resolve version
+      - name: Resolve S3 folder
         id: meta
         run: |
-          VER=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "Resolved: version=$VER"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FOLDER="${{ github.head_ref }}"
+          else
+            FOLDER="${{ github.ref_name }}"
+          fi
+          FOLDER=$(echo "$FOLDER" | tr '[:upper:]/' '[:lower:]-')
+          echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
+          echo "S3 folder: $FOLDER"
 
       - name: Download SoleSlicer CLI artifact
         uses: actions/download-artifact@v7
@@ -71,10 +76,9 @@ jobs:
 
       - name: Verify artifact contents
         run: |
-          echo "=== Artifact contents ==="
-          find artifact -type f | head -30
           if [ ! -f artifact/orca-slicer ]; then
             echo "::error::orca-slicer binary not found in downloaded artifact"
+            find artifact -type f | head -20
             exit 1
           fi
           file artifact/orca-slicer
@@ -86,7 +90,6 @@ jobs:
           TARBALL="soleslicer-linux-amd64.tar.gz"
           tar -czf "$TARBALL" -C artifact .
           SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')
-
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "Tarball: $TARBALL ($(du -h "$TARBALL" | cut -f1), sha256: $SHA256)"
@@ -98,30 +101,27 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Verify AWS access
-        run: aws sts get-caller-identity
-
       - name: Upload to S3
         env:
-          VER: ${{ steps.meta.outputs.version }}
+          FOLDER: ${{ steps.meta.outputs.folder }}
           TARBALL: ${{ steps.package.outputs.tarball }}
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
-          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/soleslicer-linux-amd64.tar.gz"
+          S3_PATH="s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/soleslicer-linux-amd64.tar.gz"
           echo "Uploading to ${S3_PATH} ..."
           aws s3 cp "$TARBALL" "$S3_PATH" \
-            --metadata "sha256=${SHA256},version=${VER}"
+            --metadata "sha256=${SHA256}"
 
           echo "${SHA256}  soleslicer-linux-amd64.tar.gz" > sha256.txt
-          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/sha256.txt"
+          aws s3 cp sha256.txt "s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/sha256.txt"
 
           echo ""
-          echo "=== Uploaded SoleSlicer v${VER} ==="
+          echo "=== Uploaded ==="
           echo "  ${S3_PATH}"
           echo "  SHA256: ${SHA256}"
 
       - name: Verify S3 upload
         env:
-          VER: ${{ steps.meta.outputs.version }}
+          FOLDER: ${{ steps.meta.outputs.folder }}
         run: |
-          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${VER}/"
+          aws s3 ls "s3://${ARTIFACT_BUCKET}/soleslicer/${FOLDER}/"
