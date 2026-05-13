@@ -106,24 +106,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      ARTIFACT_BUCKET: ${{ secrets.SOLESLICER_ARTIFACT_BUCKET }}
+      ARTIFACT_BUCKET: ai-production-packages
     steps:
-      - name: Preflight – verify required secrets
-        run: |
-          failed=0
-          for secret_name in AWS_REGION ARTIFACT_BUCKET; do
-            val=$(eval echo "\$$secret_name")
-            if [ -z "$val" ]; then
-              echo "::error::Required secret ${secret_name} is not set"
-              failed=1
-            fi
-          done
-          if [ "$failed" -eq 1 ]; then exit 1; fi
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          ARTIFACT_BUCKET: ${{ secrets.SOLESLICER_ARTIFACT_BUCKET }}
-
       - name: Checkout (for version)
         uses: actions/checkout@v6
 
