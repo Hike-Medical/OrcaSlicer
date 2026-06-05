@@ -5904,10 +5904,12 @@ std::string GCode::extrude_perimeters(const Print &print, const std::vector<Obje
     for (const ObjectByExtruder::Island::Region &region : by_region)
         if (! region.perimeters.empty()) {
             m_config.apply(print.get_print_region(&region - &by_region.front()).config());
-            // BBS: for first layer, we always print wall firstly to get better bed adhesive force
-            // This behaviour is same with cura
-            const bool should_print = is_first_layer ? !is_infill_first
-                : (m_config.is_infill_first == is_infill_first);
+            // SoleSlicer: respect is_infill_first config on first layer too. The
+            // upstream "always print walls first on layer 1 for bed adhesion"
+            // hardcode (originally inherited from Cura via BBS) breaks soft-TPU
+            // shells where we want the bottom-shell infill laid down before the
+            // perimeters so the heel-area solid infill anchors to the bed first.
+            const bool should_print = (m_config.is_infill_first == is_infill_first);
             if (!should_print) continue;
 
             for (const ExtrusionEntity* ee : region.perimeters)
